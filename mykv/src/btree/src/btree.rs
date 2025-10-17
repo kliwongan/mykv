@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::RwLock;
 
 // Thread safe and reasonably optimized in-memory B+ tree implementation
+// Heavily WIP
 struct BTree<K, V> {
     root: Arc<RwLock<Box<Node<K, V>>>>,
     bsize: usize,
