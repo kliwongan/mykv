@@ -1,5 +1,9 @@
 use std::cmp::min;
 use futures::prelude::*;
+use tokio::sync::mpsc;
+use tokio::time::timeout;
+use rand::Rng;
+
 
 #[derive(Clone)]
 enum NodeState {
@@ -39,8 +43,10 @@ struct RaftService {
     state: NodeState,
 
     // Election timeouts?
+    timeout: u64
 }
 
+#[derive(Clone)]
 struct RequestVote {
     term: u32,
     candidateId: u32,
@@ -48,11 +54,13 @@ struct RequestVote {
     lastLogTerm: u32,
 }
 
+#[derive(Clone)]
 struct RequestVoteResult {
     term: u32,
     voteGranted: bool,
 }
 
+#[derive(Clone)]
 struct AppendEntries {
     term: u32,
     leaderId: u32,
@@ -62,6 +70,7 @@ struct AppendEntries {
     leaderCommit: u32,
 }
 
+#[derive(Clone)]
 struct AppendEntriesResult {
     term: u32,
     success: bool,
@@ -69,13 +78,30 @@ struct AppendEntriesResult {
     conflictingFirstIndex: Option<u32>,
 }
 
+#[derive(Clone)]
 struct InstallSnapshot {
+    // TODO
+}
+
+#[derive(Clone)]
+struct InstallSnapshotResult {
     // TODO
 }
 
 impl RaftService {
     fn new() -> Self {
-
+        let mut rng = rand::rng();
+        RaftService {
+            currentTerm: 1,
+            votedFor: None,
+            log: Vec::new(),
+            commitIndex: 0,
+            lastApplied: 0,
+            nextIndex: 1,
+            matchIndex: 1,
+            state: NodeState::Follower,
+            timeout: rng.random_range(150..300),
+        }
     }
 
     async fn append_entries(&mut self, args: AppendEntries) -> AppendEntriesResult {
@@ -96,6 +122,7 @@ impl RaftService {
             // existing entry in the same index but conflicts with current term
             if entry.term != args.prevLogTerm {
                 // find first index and entry term of conflicting entries
+                // TODO
                 result.conflictingEntryTerm = Some(1);
                 result.conflictingFirstIndex = Some(1);
 
@@ -111,7 +138,6 @@ impl RaftService {
         for entry in args.entries {
             self.log.push(entry);
         }
-
 
         if args.leaderCommit > self.commitIndex {
             self.commitIndex = min(args.leaderCommit, self.log.len() as u32);
@@ -142,5 +168,23 @@ impl RaftService {
     async fn run(&mut self) {
         // function that operates the node itself
         
+        // First, start the election timeout
+        // await RPC queries on event queue
+        // if no queries in event queue before election timeout ends, start election
+        // else process the events in order ASAP
+
+        let (tx, mut rx) = mpsc::channel(100);
+        
+        loop { 
+            if let Err(_) = timeout(Duration::from_millis(self.timeout), rx).await {
+                // become a candidate if no heartbeat detected from leader
+                
+            }
+            
+            match self.state {
+                
+            }
+        }
+
     }
 }
