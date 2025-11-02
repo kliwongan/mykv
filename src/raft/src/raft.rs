@@ -1,11 +1,8 @@
 use std::cmp::min;
-use futures::prelude::*;
-use tokio::sync::mpsc;
-use tokio::time::timeout;
 use rand::Rng;
 
-
 #[derive(Clone)]
+#[derive(PartialEq)]
 enum NodeState {
     Leader,
     Follower,
@@ -26,6 +23,8 @@ struct LogEntry {
 
 #[derive(Clone)]
 struct RaftService {
+    _id: u32,
+
     // Persistent state
     currentTerm: u32,
     votedFor: Option<u32>,
@@ -36,8 +35,8 @@ struct RaftService {
     lastApplied: u32,
 
     // Leader state (volatile) only
-    nextIndex: Vec<u32>,
-    matchIndex: Vec<u32>,
+    nextIndex: u32,
+    matchIndex: u32,
 
     // State of the current node
     state: NodeState,
@@ -89,12 +88,13 @@ struct InstallSnapshotResult {
 }
 
 impl RaftService {
-    fn new() -> Self {
+    fn new(id: u32) -> Self {
         let mut rng = rand::rng();
         RaftService {
+            _id: id,
             currentTerm: 1,
             votedFor: None,
-            log: Vec::new(),
+            log: Vec::<LogEntry>::new(),
             commitIndex: 0,
             lastApplied: 0,
             nextIndex: 1,
@@ -104,7 +104,8 @@ impl RaftService {
         }
     }
 
-    async fn append_entries(&mut self, args: AppendEntries) -> AppendEntriesResult {
+    fn append_entries(&mut self, args: AppendEntries) -> AppendEntriesResult {
+        // TODO: need mutex guard for modifying state
         let mut result = AppendEntriesResult {
             term: self.currentTerm,
             success: false,
@@ -112,7 +113,12 @@ impl RaftService {
             conflictingFirstIndex: None,
         };
 
-        if self.currentTerm > args.term {
+        if self.currentTerm != args.term {
+            if self.currentTerm < args.term {
+                // we need to step down if we are a leader or candidate
+                self.state = NodeState::Follower;
+                self.currentTerm = args.term;
+            }
             return result;
         }
 
@@ -147,7 +153,7 @@ impl RaftService {
         return result;
     }
 
-    async fn request_vote(&mut self, args: RequestVote) -> RequestVoteResult {
+    fn request_vote(&mut self, args: RequestVote) -> RequestVoteResult {
         let mut result = RequestVoteResult {
             term: self.currentTerm,
             voteGranted: false,
@@ -166,26 +172,16 @@ impl RaftService {
         return result;
     }
 
-    async fn run(&mut self) {
-        // function that operates the node itself
-        
-        // First, start the election timeout
-        // await RPC queries on event queue
-        // if no queries in event queue before election timeout ends, start election
-        // else process the events in order ASAP
+    
+    fn becomeLeader(&mut self) {
+        self.state = NodeState::Leader;
+    }
 
-       
-        
-        loop { 
-            if let Err(_) = timeout(Duration::from_millis(self.timeout), rx).await {
-                // become a candidate if no heartbeat detected from leader
-                
-            }
-            
-            match self.state {
-                
-            }
-        }
+    fn becomeFollower(&mut self) {
+        self.state = NodeState::Follower;
+    }
 
+    fn becomeCandidate(&mut self) {
+        self.state = NodeState::Candidate
     }
 }
