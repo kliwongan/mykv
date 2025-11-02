@@ -1,8 +1,10 @@
-use std::cmp::min;
 use rand::Rng;
+use std::cmp::min;
 
-#[derive(Clone)]
-#[derive(PartialEq)]
+const MIN_ELECTION_DURATION: u64 = 150;
+const MAX_ELECTION_DURATION: u64 = 300;
+
+#[derive(Clone, PartialEq)]
 enum NodeState {
     Leader,
     Follower,
@@ -12,7 +14,7 @@ enum NodeState {
 #[derive(Clone)]
 enum Command {
     Set { key: String, value: i32 },
-    Get { key : String },
+    Get { key: String },
 }
 
 #[derive(Clone)]
@@ -21,8 +23,12 @@ struct LogEntry {
     term: u32,
 }
 
+struct NetworkConfig {
+    
+}
+
 #[derive(Clone)]
-struct RaftService {
+pub struct RaftService {
     _id: u32,
 
     // Persistent state
@@ -42,7 +48,7 @@ struct RaftService {
     state: NodeState,
 
     // Election timeouts?
-    timeout: u64
+    timeout: u64,
 }
 
 #[derive(Clone)]
@@ -88,7 +94,7 @@ struct InstallSnapshotResult {
 }
 
 impl RaftService {
-    fn new(id: u32) -> Self {
+    pub fn new(id: u32) -> Self {
         let mut rng = rand::rng();
         RaftService {
             _id: id,
@@ -100,11 +106,11 @@ impl RaftService {
             nextIndex: 1,
             matchIndex: 1,
             state: NodeState::Follower,
-            timeout: rng.random_range(150..300),
+            timeout: rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION),
         }
     }
 
-    fn append_entries(&mut self, args: AppendEntries) -> AppendEntriesResult {
+    pub fn append_entries(&mut self, args: AppendEntries) -> AppendEntriesResult {
         // TODO: need mutex guard for modifying state
         let mut result = AppendEntriesResult {
             term: self.currentTerm,
@@ -128,13 +134,14 @@ impl RaftService {
             // existing entry in the same index but conflicts with current term
             if entry.term != args.prevLogTerm {
                 // find first index and entry term of conflicting entries
-                
+
                 // TODO
                 result.conflictingEntryTerm = Some(1);
                 result.conflictingFirstIndex = Some(1);
 
                 // Delete this entry and all following entries
-                self.log.truncate((self.log.len() as u32 - args.prevLogIndex + 1) as usize);
+                self.log
+                    .truncate((self.log.len() as u32 - args.prevLogIndex + 1) as usize);
             }
             result.success = true;
         } else {
@@ -149,11 +156,11 @@ impl RaftService {
         if args.leaderCommit > self.commitIndex {
             self.commitIndex = min(args.leaderCommit, self.log.len() as u32);
         }
-        
+
         return result;
     }
 
-    fn request_vote(&mut self, args: RequestVote) -> RequestVoteResult {
+    pub fn request_vote(&mut self, args: RequestVote) -> RequestVoteResult {
         let mut result = RequestVoteResult {
             term: self.currentTerm,
             voteGranted: false,
@@ -164,7 +171,10 @@ impl RaftService {
         }
 
         let last_entry = self.log.get((args.lastLogIndex - 1) as usize);
-        if self.votedFor.is_none() && !last_entry.is_none() && last_entry.unwrap().term == args.lastLogTerm {
+        if self.votedFor.is_none()
+            && !last_entry.is_none()
+            && last_entry.unwrap().term == args.lastLogTerm
+        {
             result.voteGranted = true;
             self.votedFor = Some(args.candidateId);
         }
@@ -172,16 +182,24 @@ impl RaftService {
         return result;
     }
 
-    
-    fn becomeLeader(&mut self) {
+    pub fn becomeLeader(&mut self) {
         self.state = NodeState::Leader;
     }
 
-    fn becomeFollower(&mut self) {
+    pub fn becomeFollower(&mut self) {
         self.state = NodeState::Follower;
     }
 
-    fn becomeCandidate(&mut self) {
+    pub fn becomeCandidate(&mut self) {
         self.state = NodeState::Candidate
+    }
+
+    pub fn getTimeout(&self) -> u64 {
+        return self.timeout;
+    }
+
+    pub fn resetTimeout(&mut self) {
+        let mut rng = rand::rng();
+        self.timeout = rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION);
     }
 }
