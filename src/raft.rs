@@ -23,9 +23,7 @@ struct LogEntry {
     term: u32,
 }
 
-struct NetworkConfig {
-    
-}
+struct NetworkConfig {}
 
 #[derive(Clone)]
 pub struct RaftService {
@@ -182,6 +180,17 @@ impl RaftService {
         return result;
     }
 
+    pub fn getTimeout(&self) -> u64 {
+        return self.timeout;
+    }
+
+    pub fn resetTimeout(&mut self) {
+        let mut rng = rand::rng();
+        self.timeout = rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION);
+    }
+
+    // NodeState related methods
+
     pub fn becomeLeader(&mut self) {
         self.state = NodeState::Leader;
     }
@@ -191,15 +200,18 @@ impl RaftService {
     }
 
     pub fn becomeCandidate(&mut self) {
-        self.state = NodeState::Candidate
+        self.state = NodeState::Candidate;
     }
 
-    pub fn getTimeout(&self) -> u64 {
-        return self.timeout;
+    pub fn isLeader(&self) -> bool {
+        return self.state == NodeState::Leader;
     }
 
-    pub fn resetTimeout(&mut self) {
-        let mut rng = rand::rng();
-        self.timeout = rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION);
+    pub fn isFollower(&self) -> bool {
+        return self.state == NodeState::Follower;
+    }
+
+    pub fn isCandidate(&self) -> bool {
+        return self.state == NodeState::Candidate;
     }
 }
