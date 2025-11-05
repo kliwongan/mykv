@@ -1,8 +1,10 @@
 use std::net::SocketAddr;
 use std::time::Duration;
+use std::io::Error;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::runtime::{Handle, Runtime};
 use tokio::time::timeout;
 
 use tracing::{Level, error, info};
@@ -11,8 +13,20 @@ use tracing_subscriber::FmtSubscriber;
 mod raft;
 use raft::RaftService;
 
-async fn follower() {
-    
+fn handle_request(node: &mut RaftService, result: Result<(TcpStream, SocketAddr), Error>, handle: Handle) {
+    let (mut stream, mut address) = result.unwrap();
+    handle.spawn(async move {
+        info!("Serving request!");
+        let mut buffer = [0; 1024];
+        let _ = stream.read(&mut buffer).await;
+
+        let contents = "<h1>Hello, world!</h1>";
+        let content_length = contents.len();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {content_length}\r\n\r\n{contents}"
+        );
+        let _ = stream.write_all(response.as_bytes()).await;
+    });
 }
 
 #[tokio::main]
@@ -29,16 +43,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Listening on: http://{}", addr);
     loop {
         info!("At loop start!");
-
-        if node.isFollower() {
-            let timeout_duration = Duration::from_millis(node.getTimeout());
+        if node.is_follower() {
+            info!("Node is a follower");
+            let timeout_duration = Duration::from_millis(node.get_timeout());
             let result = timeout(timeout_duration, listener.accept()).await;
             match result {
                 Err(_) => {
-                    // if timeout is reached, become a candidate
                     info!("Becoming a candidate because timeout was reached");
-                    node.becomeCandidate();
-                    // continue loop or keep processing?
+                    //node.become_candidate();
+                    node.reset_timeout();
+                    continue;
                 }
                 Ok(result) => {
                     if let Err(_) = result {
@@ -46,29 +60,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // error with receiving the RPC
                         continue;
                     } else {
-                        let (mut stream, mut address) = result.unwrap();
-                        tokio::spawn(async move {
-                            info!("Serving request!");
-                            let mut buffer = [0; 1024];
-                            let _ = stream.read(&mut buffer).await;
-
-                            let contents = "<h1>Hello, world!</h1>";
-                            let content_length = contents.len();
-                            let response = format!(
-                                "HTTP/1.1 200 OK\r\nContent-Length: {content_length}\r\n\r\n{contents}"
-                            );
-                            let _ = stream.write_all(response.as_bytes()).await;
-                        });
+                        let rt = Runtime::new().unwrap();
+                        let handle = rt.handle();
+                        handle_request(&mut node, result, handle.clone());
                     }
                 }
             };
-        } else if node.isCandidate() {
+        } else if node.is_candidate() {
             // start an election
-            
+            info!("Node is a candidate");
             // wait for votes
 
             // if majority is reached become leader
-
+            // else if another node rejects and returns a greater term, revert to follower
 
         } else {
             // node is leader

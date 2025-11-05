@@ -1,6 +1,7 @@
 use rand::Rng;
 use std::cmp::min;
 
+// Based on the recommended values from the Raft paper
 const MIN_ELECTION_DURATION: u64 = 150;
 const MAX_ELECTION_DURATION: u64 = 300;
 
@@ -180,38 +181,38 @@ impl RaftService {
         return result;
     }
 
-    pub fn getTimeout(&self) -> u64 {
+    pub fn get_timeout(&self) -> u64 {
         return self.timeout;
     }
 
-    pub fn resetTimeout(&mut self) {
+    pub fn reset_timeout(&mut self) {
         let mut rng = rand::rng();
         self.timeout = rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION);
     }
 
     // NodeState related methods
 
-    pub fn becomeLeader(&mut self) {
+    pub fn become_leader(&mut self) {
         self.state = NodeState::Leader;
     }
 
-    pub fn becomeFollower(&mut self) {
+    pub fn become_follower(&mut self) {
         self.state = NodeState::Follower;
     }
 
-    pub fn becomeCandidate(&mut self) {
+    pub fn become_candidate(&mut self) {
         self.state = NodeState::Candidate;
     }
 
-    pub fn isLeader(&self) -> bool {
+    pub fn is_leader(&self) -> bool {
         return self.state == NodeState::Leader;
     }
 
-    pub fn isFollower(&self) -> bool {
+    pub fn is_follower(&self) -> bool {
         return self.state == NodeState::Follower;
     }
 
-    pub fn isCandidate(&self) -> bool {
+    pub fn is_candidate(&self) -> bool {
         return self.state == NodeState::Candidate;
     }
 }
