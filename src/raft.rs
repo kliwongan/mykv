@@ -1,6 +1,8 @@
 use rand::Rng;
 use std::cmp::min;
 
+use serde::{Serialize, Deserialize};
+
 // Based on the recommended values from the Raft paper
 const MIN_ELECTION_DURATION: u64 = 150;
 const MAX_ELECTION_DURATION: u64 = 300;
@@ -12,19 +14,21 @@ enum NodeState {
     Candidate,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 enum Command {
     Set { key: String, value: i32 },
     Get { key: String },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct LogEntry {
     command: Command,
     term: u32,
 }
 
-struct NetworkConfig {}
+struct NetworkConfig {
+    nodes: Vec<String>,
+}
 
 #[derive(Clone)]
 pub struct RaftService {
@@ -50,7 +54,7 @@ pub struct RaftService {
     timeout: u64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct RequestVote {
     term: u32,
     candidateId: u32,
@@ -58,13 +62,13 @@ struct RequestVote {
     lastLogTerm: u32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct RequestVoteResult {
     term: u32,
     voteGranted: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct AppendEntries {
     term: u32,
     leaderId: u32,
@@ -74,7 +78,7 @@ struct AppendEntries {
     leaderCommit: u32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct AppendEntriesResult {
     term: u32,
     success: bool,
@@ -82,14 +86,30 @@ struct AppendEntriesResult {
     conflictingFirstIndex: Option<u32>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct InstallSnapshot {
     // TODO
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct InstallSnapshotResult {
     // TODO
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(untagged)]
+pub enum RaftRequest {
+    AppendEntries,
+    RequestVote,
+    InstallSnapshot
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(untagged)]
+pub enum RaftResponse {
+    AppendEntriesResult,
+    RequestVoteResult,
+    InstallSnapshotResult,
 }
 
 impl RaftService {
@@ -179,6 +199,28 @@ impl RaftService {
         }
 
         return result;
+    }
+
+    pub fn run_election(&mut self) {
+
+    }
+
+    pub fn execute_from_message(&mut self, message: &str) -> &str {
+        let message = RaftService::parse_request(&message);
+        match message {
+            
+        }
+        return "yo";
+    }
+
+    pub fn parse_request(message: &str) -> RaftRequest {
+        let deserialized: RaftRequest = serde_json::from_str(&message).unwrap();
+        return deserialized;
+    }
+
+    pub fn parse_response(message: RaftResponse) -> String {
+        let serialized = serde_json::to_string(&message).unwrap();
+        return serialized
     }
 
     pub fn get_timeout(&self) -> u64 {

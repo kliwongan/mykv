@@ -11,9 +11,10 @@ use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod raft;
-use raft::RaftService;
+use raft::{RaftService, RaftRequest};
 
-fn handle_request(node: &mut RaftService, result: Result<(TcpStream, SocketAddr), Error>, handle: Handle) {
+fn handle_basic_http_request(node: &mut RaftService, result: Result<(TcpStream, SocketAddr), Error>, handle: Handle) {
+    // dummy function for testing purposes
     let (mut stream, mut address) = result.unwrap();
     handle.spawn(async move {
         info!("Serving request!");
@@ -25,6 +26,23 @@ fn handle_request(node: &mut RaftService, result: Result<(TcpStream, SocketAddr)
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Length: {content_length}\r\n\r\n{contents}"
         );
+        let _ = stream.write_all(response.as_bytes()).await;
+    });
+}
+
+async fn handle_request(node: &mut RaftService, result: Result<(TcpStream, SocketAddr), Error>, handle: Handle) {
+    let (mut stream, mut address) = result.unwrap();
+    handle.spawn(async move {
+        info!("Deserializing request!");
+        let mut buffer = [0; 1024];
+        let _ = stream.read(&mut buffer).await;
+        
+        // deserialize
+        let message = String::from_utf8(buffer.to_vec()).unwrap();
+        info!("{}", format!("{}: {}", "Message", &message));
+        let response = node.execute_from_message(&message);
+        
+        // now write the response back
         let _ = stream.write_all(response.as_bytes()).await;
     });
 }
