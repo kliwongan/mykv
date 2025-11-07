@@ -207,10 +207,11 @@ impl RaftService {
 
     pub fn execute_from_message(&mut self, message: &str) -> &str {
         let message = RaftService::parse_request(&message);
-        match message {
-            
-        }
-        return "yo";
+        let inter: RaftResponse = match message {
+            RaftRequest::AppendEntries => self.append_entries(message),
+            RaftRequest::RequestVote => self.request_vote(message),
+            RaftRequest::InstallSnapshot => "OK",
+        };
     }
 
     pub fn parse_request(message: &str) -> RaftRequest {

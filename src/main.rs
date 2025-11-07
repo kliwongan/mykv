@@ -1,11 +1,13 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 use std::io::Error;
+use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::{Handle, Runtime};
 use tokio::time::timeout;
+use tokio::sync::Mutex;
 
 use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
@@ -30,9 +32,11 @@ fn handle_basic_http_request(node: &mut RaftService, result: Result<(TcpStream, 
     });
 }
 
-async fn handle_request(node: &mut RaftService, result: Result<(TcpStream, SocketAddr), Error>, handle: Handle) {
+async fn handle_request(node: Arc<Mutex<RaftService>>, result: Result<(TcpStream, SocketAddr), Error>, handle: Handle) {
     let (mut stream, mut address) = result.unwrap();
     handle.spawn(async move {
+        let cur_node = Arc::clone(&node);
+        let mut node_lock = cur_node.lock().await;
         info!("Deserializing request!");
         let mut buffer = [0; 1024];
         let _ = stream.read(&mut buffer).await;
@@ -40,7 +44,7 @@ async fn handle_request(node: &mut RaftService, result: Result<(TcpStream, Socke
         // deserialize
         let message = String::from_utf8(buffer.to_vec()).unwrap();
         info!("{}", format!("{}: {}", "Message", &message));
-        let response = node.execute_from_message(&message);
+        let response = node_lock.execute_from_message(&message);
         
         // now write the response back
         let _ = stream.write_all(response.as_bytes()).await;
@@ -51,7 +55,7 @@ async fn handle_request(node: &mut RaftService, result: Result<(TcpStream, Socke
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([127, 0, 0, 1], 2222));
     let listener = TcpListener::bind(&addr).await?;
-    let mut node = RaftService::new(2222);
+    let node = Arc::new(Mutex::new(RaftService::new(2222)));
 
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::TRACE)
@@ -60,16 +64,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Listening on: http://{}", addr);
     loop {
+
         info!("At loop start!");
-        if node.is_follower() {
+        let cur_node = Arc::clone(&node);
+        let mut node_lock = cur_node.lock().await;
+        if node_lock.is_follower() {
             info!("Node is a follower");
-            let timeout_duration = Duration::from_millis(node.get_timeout());
+            let timeout_duration = Duration::from_millis(node_lock.get_timeout());
             let result = timeout(timeout_duration, listener.accept()).await;
             match result {
                 Err(_) => {
                     info!("Becoming a candidate because timeout was reached");
                     //node.become_candidate();
-                    node.reset_timeout();
+                    node_lock.reset_timeout();
+                    drop(node_lock);
                     continue;
                 }
                 Ok(result) => {
@@ -80,11 +88,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     } else {
                         let rt = Runtime::new().unwrap();
                         let handle = rt.handle();
-                        handle_request(&mut node, result, handle.clone());
+                        drop(node_lock);
+                        handle_request(cur_node, result, handle.clone());
                     }
                 }
             };
-        } else if node.is_candidate() {
+        } else if node_lock.is_candidate() {
             // start an election
             info!("Node is a candidate");
             // wait for votes
