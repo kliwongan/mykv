@@ -1,5 +1,6 @@
 use rand::Rng;
 use std::cmp::min;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Serialize, Deserialize};
 
@@ -26,8 +27,9 @@ struct LogEntry {
     term: u32,
 }
 
+#[derive(Clone)]
 struct NetworkConfig {
-    nodes: Vec<String>,
+    nodes: HashSet<String>,
 }
 
 #[derive(Clone)]
@@ -50,8 +52,12 @@ pub struct RaftService {
     // State of the current node
     state: NodeState,
 
-    // Election timeouts?
+    // Election timeouts
     timeout: u64,
+
+    // Implementation based state
+    voteState: HashSet<String>,
+    network: NetworkConfig,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -63,7 +69,7 @@ struct RequestVote {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-struct RequestVoteResult {
+struct RequestVoteReply {
     term: u32,
     voteGranted: bool,
 }
@@ -79,7 +85,7 @@ struct AppendEntries {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-struct AppendEntriesResult {
+struct AppendEntriesReply {
     term: u32,
     success: bool,
     conflictingEntryTerm: Option<u32>,
@@ -92,24 +98,20 @@ struct InstallSnapshot {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-struct InstallSnapshotResult {
+struct InstallSnapshotReply {
     // TODO
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(untagged)]
-pub enum RaftRequest {
-    AppendEntries,
-    RequestVote,
-    InstallSnapshot
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-#[serde(untagged)]
-pub enum RaftResponse {
-    AppendEntriesResult,
-    RequestVoteResult,
-    InstallSnapshotResult,
+pub enum RaftMessage {
+    AE(AppendEntries),
+    RV(RequestVote),
+    IS(InstallSnapshot),
+    AE_R(AppendEntriesReply),
+    RV_R(RequestVoteReply),
+    IS_R(InstallSnapshotReply),
+    Nil,
 }
 
 impl RaftService {
@@ -126,12 +128,14 @@ impl RaftService {
             matchIndex: 1,
             state: NodeState::Follower,
             timeout: rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION),
+            voteState: HashSet::new(),
+            network: NetworkConfig { nodes: HashSet::new() },
         }
     }
 
-    pub fn append_entries(&mut self, args: AppendEntries) -> AppendEntriesResult {
+    pub fn append_entries(&mut self, args: AppendEntries) -> AppendEntriesReply {
         // TODO: need mutex guard for modifying state
-        let mut result = AppendEntriesResult {
+        let mut result = AppendEntriesReply {
             term: self.currentTerm,
             success: false,
             conflictingEntryTerm: None,
@@ -179,8 +183,8 @@ impl RaftService {
         return result;
     }
 
-    pub fn request_vote(&mut self, args: RequestVote) -> RequestVoteResult {
-        let mut result = RequestVoteResult {
+    pub fn request_vote(&mut self, args: RequestVote) -> RequestVoteReply {
+        let mut result = RequestVoteReply {
             term: self.currentTerm,
             voteGranted: false,
         };
@@ -201,27 +205,34 @@ impl RaftService {
         return result;
     }
 
-    pub fn run_election(&mut self) {
-
+    pub fn check_majority(&mut self) -> bool {
+        let inter = self.voteState.intersection(&self.network.nodes);
+        let cnt = inter.count();
+        return cnt >= (self.network.nodes.len()).div_ceil(2);
     }
 
-    pub fn execute_from_message(&mut self, message: &str) -> &str {
+    pub fn execute_from_message(&mut self, message: &str) -> String {
         let message = RaftService::parse_request(&message);
-        let inter: RaftResponse = match message {
-            RaftRequest::AppendEntries => self.append_entries(message),
-            RaftRequest::RequestVote => self.request_vote(message),
-            RaftRequest::InstallSnapshot => "OK",
+        let inter: RaftMessage = match message {
+            RaftMessage::AE(append_entries) => RaftMessage::AE_R(self.append_entries(append_entries)),
+            RaftMessage::RV(request_vote) => RaftMessage::RV_R(self.request_vote(request_vote)),
+            RaftMessage::IS(install_snapshot) => RaftMessage::IS_R(InstallSnapshotReply{}),
+            RaftMessage::AE_R(append_entries_reply) => RaftMessage::Nil,
+            RaftMessage::RV_R(request_vote_reply) => RaftMessage::Nil,
+            RaftMessage::IS_R(install_snapshot_reply) => RaftMessage::Nil,
+            _ => RaftMessage::Nil,
         };
+        return RaftService::parse_response(inter);
     }
 
-    pub fn parse_request(message: &str) -> RaftRequest {
-        let deserialized: RaftRequest = serde_json::from_str(&message).unwrap();
+    pub fn parse_request(message: &str) -> RaftMessage {
+        let deserialized: RaftMessage = serde_json::from_str(&message).unwrap();
         return deserialized;
     }
 
-    pub fn parse_response(message: RaftResponse) -> String {
+    pub fn parse_response(message: RaftMessage) -> String {
         let serialized = serde_json::to_string(&message).unwrap();
-        return serialized
+        return serialized;
     }
 
     pub fn get_timeout(&self) -> u64 {
@@ -247,6 +258,14 @@ impl RaftService {
         self.state = NodeState::Candidate;
     }
 
+    pub fn setTerm(&mut self) {
+        self.currentTerm += 1;
+    }
+
+    pub fn getTerm(&self) -> u32 {
+        return self.currentTerm;
+    }
+
     pub fn is_leader(&self) -> bool {
         return self.state == NodeState::Leader;
     }
@@ -257,5 +276,9 @@ impl RaftService {
 
     pub fn is_candidate(&self) -> bool {
         return self.state == NodeState::Candidate;
+    }
+
+    pub fn add_to_network(&mut self, node: &str) {
+        self.network.nodes.insert(node.to_string());
     }
 }

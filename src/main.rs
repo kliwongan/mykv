@@ -13,7 +13,7 @@ use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod raft;
-use raft::{RaftService, RaftRequest};
+use raft::{RaftService, RaftMessage};
 
 fn handle_basic_http_request(node: &mut RaftService, result: Result<(TcpStream, SocketAddr), Error>, handle: Handle) {
     // dummy function for testing purposes
@@ -41,7 +41,6 @@ async fn handle_request(node: Arc<Mutex<RaftService>>, result: Result<(TcpStream
         let mut buffer = [0; 1024];
         let _ = stream.read(&mut buffer).await;
         
-        // deserialize
         let message = String::from_utf8(buffer.to_vec()).unwrap();
         info!("{}", format!("{}: {}", "Message", &message));
         let response = node_lock.execute_from_message(&message);
@@ -94,10 +93,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
         } else if node_lock.is_candidate() {
-            // start an election
             info!("Node is a candidate");
             // wait for votes
-
+            
             // if majority is reached become leader
             // else if another node rejects and returns a greater term, revert to follower
 
@@ -105,7 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // node is leader
 
             // await client requests
-
+            
             // if client requests to see something, return the connection within its log
             // else, 
         }
