@@ -29,7 +29,7 @@ struct LogEntry {
 
 #[derive(Clone)]
 struct NetworkConfig {
-    nodes: HashSet<String>,
+    nodes: HashSet<u32>,
 }
 
 #[derive(Clone)]
@@ -56,7 +56,7 @@ pub struct RaftService {
     timeout: u64,
 
     // Implementation based state
-    voteState: HashSet<String>,
+    voteState: HashSet<u32>,
     network: NetworkConfig,
 }
 
@@ -72,6 +72,7 @@ struct RequestVote {
 struct RequestVoteReply {
     term: u32,
     voteGranted: bool,
+    _id: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -90,6 +91,7 @@ struct AppendEntriesReply {
     success: bool,
     conflictingEntryTerm: Option<u32>,
     conflictingFirstIndex: Option<u32>,
+    _id: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -140,6 +142,7 @@ impl RaftService {
             success: false,
             conflictingEntryTerm: None,
             conflictingFirstIndex: None,
+            _id: self._id,
         };
 
         if self.currentTerm != args.term {
@@ -187,6 +190,7 @@ impl RaftService {
         let mut result = RequestVoteReply {
             term: self.currentTerm,
             voteGranted: false,
+            _id: self._id,
         };
 
         if self.currentTerm > args.term {
@@ -203,6 +207,14 @@ impl RaftService {
         }
 
         return result;
+    }
+
+    pub fn request_vote_reply(&mut self, args: RequestVoteReply) {
+        if args.voteGranted {
+            self.voteState.insert(args._id);
+        } else if args.term >= self.currentTerm {
+            self.state = NodeState::Follower;
+        }
     }
 
     pub fn check_majority(&mut self) -> bool {
@@ -278,7 +290,7 @@ impl RaftService {
         return self.state == NodeState::Candidate;
     }
 
-    pub fn add_to_network(&mut self, node: &str) {
-        self.network.nodes.insert(node.to_string());
+    pub fn add_to_network(&mut self, node: u32) {
+        self.network.nodes.insert(node);
     }
 }
