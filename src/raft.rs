@@ -2,7 +2,7 @@ use rand::Rng;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 // Based on the recommended values from the Raft paper
 const MIN_ELECTION_DURATION: u64 = 150;
@@ -46,8 +46,8 @@ pub struct RaftService {
     lastApplied: u32,
 
     // Leader state (volatile) only
-    nextIndex: u32,
-    matchIndex: u32,
+    nextIndex: HashMap<u32, u32>,
+    matchIndex: HashMap<u32, u32>,
 
     // State of the current node
     state: NodeState,
@@ -126,17 +126,18 @@ impl RaftService {
             log: Vec::<LogEntry>::new(),
             commitIndex: 0,
             lastApplied: 0,
-            nextIndex: 1,
-            matchIndex: 1,
+            nextIndex: HashMap::new(),
+            matchIndex: HashMap::new(),
             state: NodeState::Follower,
             timeout: rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION),
             voteState: HashSet::new(),
-            network: NetworkConfig { nodes: HashSet::new() },
+            network: NetworkConfig {
+                nodes: HashSet::new(),
+            },
         }
     }
 
-    pub fn append_entries(&mut self, args: AppendEntries) -> AppendEntriesReply {
-        // TODO: need mutex guard for modifying state
+    pub fn append_entries_receiver(&mut self, args: AppendEntries) -> AppendEntriesReply {
         let mut result = AppendEntriesReply {
             term: self.currentTerm,
             success: false,
@@ -160,7 +161,7 @@ impl RaftService {
             // existing entry in the same index but conflicts with current term
             if entry.term != args.prevLogTerm {
                 // find first index and entry term of conflicting entries
-
+                
                 // TODO
                 result.conflictingEntryTerm = Some(1);
                 result.conflictingFirstIndex = Some(1);
@@ -186,7 +187,7 @@ impl RaftService {
         return result;
     }
 
-    pub fn request_vote(&mut self, args: RequestVote) -> RequestVoteReply {
+    pub fn request_vote_receiver(&mut self, args: RequestVote) -> RequestVoteReply {
         let mut result = RequestVoteReply {
             term: self.currentTerm,
             voteGranted: false,
@@ -209,11 +210,74 @@ impl RaftService {
         return result;
     }
 
-    pub fn request_vote_reply(&mut self, args: RequestVoteReply) {
+    pub fn request_vote_sender_response(&mut self, args: RequestVoteReply) {
         if args.voteGranted {
             self.voteState.insert(args._id);
         } else if args.term >= self.currentTerm {
             self.state = NodeState::Follower;
+        }
+    }
+
+    pub fn append_entries_sender_response(
+        &mut self,
+        args: AppendEntriesReply,
+    ) -> Option<AppendEntries> {
+        if !args.success {
+            self.nextIndex
+                .insert(args._id, self.nextIndex.get(&args._id).unwrap() - 1);
+            let mut nextIndex = self.nextIndex.get(&args._id).unwrap().clone();
+
+            // minor AppendEntries optimization
+            let conflictingFirstIndex = args.conflictingFirstIndex;
+            let conflictingEntryTerm = args.conflictingEntryTerm;
+
+            if conflictingEntryTerm.is_some() && conflictingFirstIndex.is_some() {
+                let newIndex = conflictingFirstIndex.unwrap();
+                nextIndex = newIndex - 1;
+            }
+            let prevLogTerm = if self.log.len() as u32 - 1 >= 0 {
+                self.log.get(nextIndex).unwrap().term
+            } else {
+                self.currentTerm
+            };
+
+            return Some(AppendEntries {
+                term: self.currentTerm,
+                leaderId: self._id,
+                prevLogIndex: nextIndex,
+                prevLogTerm: prevLogTerm,
+                entries: self.log.clone(),
+                leaderCommit: self.commitIndex,
+            });
+        }
+        None
+    }
+
+    pub fn send_append_entries(&self) -> AppendEntries {
+        AppendEntries {
+            term: self.currentTerm,
+            leaderId: self._id,
+            prevLogIndex: self.log.len() as u32 - 1,
+            prevLogTerm: if self.log.len() as u32 - 1 >= 0 {
+                self.log.get(self.log.len() - 1).unwrap().term
+            } else {
+                self.currentTerm
+            },
+            entries: self.log.clone(),
+            leaderCommit: self.commitIndex,
+        }
+    }
+
+    pub fn send_request_vote(&self) -> RequestVote {
+        RequestVote {
+            term: self.currentTerm,
+            candidateId: self._id,
+            lastLogIndex: self.log.len() as u32 - 1,
+            lastLogTerm: if self.log.len() as u32 - 1 >= 0 {
+                self.log.get(self.log.len() - 1).unwrap().term
+            } else {
+                self.currentTerm
+            },
         }
     }
 
@@ -226,9 +290,13 @@ impl RaftService {
     pub fn execute_from_message(&mut self, message: &str) -> String {
         let message = RaftService::parse_request(&message);
         let inter: RaftMessage = match message {
-            RaftMessage::AE(append_entries) => RaftMessage::AE_R(self.append_entries(append_entries)),
-            RaftMessage::RV(request_vote) => RaftMessage::RV_R(self.request_vote(request_vote)),
-            RaftMessage::IS(install_snapshot) => RaftMessage::IS_R(InstallSnapshotReply{}),
+            RaftMessage::AE(append_entries) => {
+                RaftMessage::AE_R(self.append_entries_receiver(append_entries))
+            }
+            RaftMessage::RV(request_vote) => {
+                RaftMessage::RV_R(self.request_vote_receiver(request_vote))
+            }
+            RaftMessage::IS(install_snapshot) => RaftMessage::IS_R(InstallSnapshotReply {}),
             RaftMessage::AE_R(append_entries_reply) => RaftMessage::Nil,
             RaftMessage::RV_R(request_vote_reply) => RaftMessage::Nil,
             RaftMessage::IS_R(install_snapshot_reply) => RaftMessage::Nil,
@@ -270,8 +338,8 @@ impl RaftService {
         self.state = NodeState::Candidate;
     }
 
-    pub fn setTerm(&mut self) {
-        self.currentTerm += 1;
+    pub fn setTerm(&mut self, term: u32) {
+        self.currentTerm = term;
     }
 
     pub fn getTerm(&self) -> u32 {

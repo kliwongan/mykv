@@ -1,21 +1,25 @@
-use std::net::SocketAddr;
-use std::time::Duration;
 use std::io::Error;
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::{Handle, Runtime};
-use tokio::time::timeout;
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 
 use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod raft;
-use raft::{RaftService, RaftMessage};
+use raft::{RaftMessage, RaftService};
 
-fn handle_basic_http_request(node: &mut RaftService, result: Result<(TcpStream, SocketAddr), Error>, handle: Handle) {
+fn handle_basic_http_request(
+    node: &mut RaftService,
+    result: Result<(TcpStream, SocketAddr), Error>,
+    handle: Handle,
+) {
     // dummy function for testing purposes
     let (mut stream, mut address) = result.unwrap();
     handle.spawn(async move {
@@ -25,14 +29,17 @@ fn handle_basic_http_request(node: &mut RaftService, result: Result<(TcpStream, 
 
         let contents = "<h1>Hello, world!</h1>";
         let content_length = contents.len();
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {content_length}\r\n\r\n{contents}"
-        );
+        let response =
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {content_length}\r\n\r\n{contents}");
         let _ = stream.write_all(response.as_bytes()).await;
     });
 }
 
-async fn handle_request(node: Arc<Mutex<RaftService>>, result: Result<(TcpStream, SocketAddr), Error>, handle: Handle) {
+async fn handle_request(
+    node: Arc<Mutex<RaftService>>,
+    result: Result<(TcpStream, SocketAddr), Error>,
+    handle: Handle,
+) {
     let (mut stream, mut address) = result.unwrap();
     handle.spawn(async move {
         let cur_node = Arc::clone(&node);
@@ -40,15 +47,17 @@ async fn handle_request(node: Arc<Mutex<RaftService>>, result: Result<(TcpStream
         info!("Deserializing request!");
         let mut buffer = [0; 1024];
         let _ = stream.read(&mut buffer).await;
-        
+
         let message = String::from_utf8(buffer.to_vec()).unwrap();
         info!("{}", format!("{}: {}", "Message", &message));
         let response = node_lock.execute_from_message(&message);
-        
+
         // now write the response back
         let _ = stream.write_all(response.as_bytes()).await;
     });
 }
+
+async fn run_candidate()
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -63,7 +72,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Listening on: http://{}", addr);
     loop {
-
         info!("At loop start!");
         let cur_node = Arc::clone(&node);
         let mut node_lock = cur_node.lock().await;
@@ -94,18 +102,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
         } else if node_lock.is_candidate() {
             info!("Node is a candidate");
-            // wait for votes
-            
-            // if majority is reached become leader
-            // else if another node rejects and returns a greater term, revert to follower
+            node_lock.setTerm(node_lock.getTerm() + 1);
 
         } else {
             // node is leader
 
             // await client requests
-            
+
             // if client requests to see something, return the connection within its log
-            // else, 
+            // else,
         }
     }
 }
