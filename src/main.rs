@@ -1,5 +1,6 @@
-mod raft;
-use raft::RaftService;
+mod raft_node;
+mod raft_service;
+use raft_service::RaftService;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
