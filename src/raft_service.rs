@@ -37,11 +37,11 @@ impl RaftService {
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
 
+        let cur_node = self.node.clone();
         info!("Listening on: http://{}", addr);
         loop {
             info!("At loop start!");
-            let cur_node = Arc::clone(&self.node);
-            let mut node_lock = cur_node.lock().await;
+            let mut node_lock = self.node.clone().lock().await;
             if node_lock.is_follower() {
                 info!("Node is a follower");
                 let timeout_duration = Duration::from_millis(node_lock.get_timeout());
@@ -62,17 +62,32 @@ impl RaftService {
                             let rt = Runtime::new().unwrap();
                             let handle = rt.handle();
                             drop(node_lock);
-                            handle_request(cur_node, result, handle.clone());
+                            handle_request(Arc::clone(&self.node), result, handle.clone());
                         }
                     }
                 };
             } else if node_lock.is_candidate() {
                 info!("Node is a candidate");
-                let timeout_duration = Duration::from_millis(node_lock.get_timeout());
+                let timeout_duration = Duration::from_millis(node_lock.timeout);
                 // let result = timeout(timeout_duration, listener.accept()).await;
                 while !node_lock.check_majority() {
                     // send out RequestVote requests to nodes
-                    
+                    for node in node_lock.get_network() {
+                        // start a tokio task that
+                        // opens a TCP connection with that node
+                        // awaits its response
+                        // responds accordingly
+                        tokio::spawn(async move {
+                            let node_addr = SocketAddr::from(([127, 0, 0, 1], *node as u16));
+                            let stream = TcpStream::connect(&addr).await.unwrap();
+                            let data = node_lock.send_request_vote();
+                        });
+
+                        // worry about deadlocks?
+
+
+                    }
+
                     // for each response back, respond accordingly
 
                     // at the end of the loop, if the node isn't voted majority yet, reset election timeout

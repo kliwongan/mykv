@@ -34,30 +34,30 @@ struct NetworkConfig {
 
 #[derive(Clone)]
 pub struct RaftNode {
-    _id: u32,
+    pub _id: u32,
 
     // Persistent state
-    currentTerm: u32,
-    votedFor: Option<u32>,
-    log: Vec<LogEntry>,
+    pub currentTerm: u32,
+    pub votedFor: Option<u32>,
+    pub log: Vec<LogEntry>,
 
     // Volatile state
-    commitIndex: u32,
-    lastApplied: u32,
+    pub commitIndex: u32,
+    pub lastApplied: u32,
 
     // Leader state (volatile) only
-    nextIndex: HashMap<u32, u32>,
-    matchIndex: HashMap<u32, u32>,
+    pub nextIndex: HashMap<u32, u32>,
+    pub matchIndex: HashMap<u32, u32>,
 
     // State of the current node
-    state: NodeState,
+    pub state: NodeState,
 
     // Election timeouts
-    timeout: u64,
+    pub timeout: u64,
 
     // Implementation based state
-    voteState: HashSet<u32>,
-    network: NetworkConfig,
+    pub voteState: HashSet<u32>,
+    pub network: NetworkConfig,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -373,5 +373,9 @@ impl RaftNode {
 
     pub fn add_to_network(&mut self, node: u32) {
         self.network.nodes.insert(node);
+    }
+
+    pub fn get_network(&self) -> &HashSet<u32> {
+        &self.network.nodes
     }
 }
