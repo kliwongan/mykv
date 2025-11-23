@@ -210,7 +210,8 @@ impl RaftNode {
         return result;
     }
 
-    pub fn request_vote_sender_response(&mut self, args: RequestVoteReply) {
+    pub fn request_vote_sender_response(&mut self, args: String) {
+        let args = RaftNode::parse_response(args);
         if args.voteGranted {
             self.voteState.insert(args._id);
         } else if args.term >= self.currentTerm {
@@ -309,7 +310,7 @@ impl RaftNode {
             RaftMessage::IS_R(install_snapshot_reply) => RaftMessage::Nil,
             _ => RaftMessage::Nil,
         };
-        
+
         return RaftNode::parse_response(inter);
     }
 

@@ -1,8 +1,8 @@
 mod raft_node;
 mod raft_service;
 
-use raft_service::RaftService;
 use raft_node::RaftNode;
+use raft_service::RaftService;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;

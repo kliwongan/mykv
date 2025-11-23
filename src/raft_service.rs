@@ -1,19 +1,19 @@
 use std::io::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, Interest};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::{Handle, Runtime};
 use tokio::sync::Mutex;
-use tokio::time::timeout;
 use tokio::task::JoinSet;
+use tokio::time::timeout;
 
 use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
-use crate::raft_node::{RaftNode, NodeState};
+use crate::raft_node::{NodeState, RaftNode};
 
 pub struct RaftService {
     node: Arc<Mutex<RaftNode>>,
@@ -44,7 +44,6 @@ impl RaftService {
             let mut state = NodeState::Follower;
             {
                 state = node_lock.getState().clone();
-
             }
             if state == NodeState::Follower {
                 info!("Node is a follower");
@@ -72,45 +71,76 @@ impl RaftService {
             } else if state == NodeState::Candidate {
                 info!("Node is a candidate");
                 let timeout_duration = Duration::from_millis(node_lock.timeout);
-                let mut set: JoinSet<()> = JoinSet::new();
-                // let result = timeout(timeout_duration, listener.accept()).await;
                 if !node_lock.check_majority() {
                     let now = SystemTime::now();
+                    let mut set: JoinSet<String> = JoinSet::new();
                     let network = node_lock.get_network().clone();
-                    drop(node_lock);
+                    let data = node_lock.send_request_vote();
+                    let data_clone = data.clone();
+
                     for node in network {
-                        // start a tokio task that
-                        // opens a TCP connection with that node
-                        // awaits its response
-                        // responds accordingly
-                        let new_node = self.node.clone();
+                        let message = data_clone.clone();
                         set.spawn(async move {
-                            let mut new_node_clone = new_node.clone();
+                            let message = message.clone();
                             let node_addr = SocketAddr::from(([127, 0, 0, 1], node as u16));
-                            let stream = TcpStream::connect(&addr).await.unwrap();
-                            let new_node_lock = new_node_clone.lock().await;
-                            let data = new_node_lock.send_request_vote();
-                            drop(new_node_lock);
+                            let mut stream = TcpStream::connect(&node_addr).await.unwrap();
+
+                            stream.write_all(message.as_bytes()).await.unwrap();
 
                             // wait on the same stream for a response back
-                            
+                            loop {
+                                // Wait for the socket to be readable
+                                stream.readable().await.unwrap();
 
+                                // Creating the buffer **after** the `await` prevents it from
+                                // being stored in the async task.
+                                let mut buf = [0; 4096];
+
+                                // Try to read data, this may still fail with `WouldBlock`
+                                // if the readiness event is a false positive.
+                                match stream.try_read(&mut buf) {
+                                    Ok(0) => break,
+                                    Ok(n) => {
+                                        let response = String::from_utf8(buf.to_vec()).unwrap();
+                                        info!("read {} bytes from the current node {} with response {}", n, node, response);
+                                        // parse into RaftMessage and send it to 
+                                        return response;
+
+                                    }
+                                    Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        error!("{} (Error for node {})", e, node);
+                                    }
+                                }
+                            }
+
+                            String::from("")
                         });
-                        // worry about deadlocks?
                     }
                     // at the end of the loop, if the node isn't voted majority yet, reset election timeout
                     // and repeat
-                    //RaftService::parse_response(node_lock.send_request_vote());
+                    let vote_result = set.join_all().await;
+                    if (now.elapsed().unwrap() > timeout_duration) {
+                        // increment term and start new election
+                        node_lock.incrementTerm();
+                        drop(node_lock);
+                        continue;
+                    }
+
+                    // parse vote result
+                    for message in vote_result {
+                        node_lock.execute_from_message(message.as_str());
+                    }
                 }
                 // else, the node is voted to become leader,
                 self.node.lock().await.become_leader();
             } else {
                 // node is leader
 
-                // await client requests
+                // send out heartbeat requests for now
 
-                // if client requests to see something, return the connection within its log
-                // else,
             }
         }
     }
