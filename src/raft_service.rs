@@ -8,11 +8,12 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::{Handle, Runtime};
 use tokio::sync::Mutex;
 use tokio::time::timeout;
+use tokio::task::JoinSet;
 
 use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
-use crate::raft_node::RaftNode;
+use crate::raft_node::{RaftNode, NodeState};
 
 pub struct RaftService {
     node: Arc<Mutex<RaftNode>>,
@@ -20,9 +21,9 @@ pub struct RaftService {
 }
 
 impl RaftService {
-    pub fn new(id: u32) -> RaftService {
+    pub fn new(id: u32, node: Arc<Mutex<RaftNode>>) -> RaftService {
         RaftService {
-            node: Arc::new(Mutex::new(RaftNode::new(id))),
+            node: node.clone(),
             id: id,
         }
     }
@@ -36,13 +37,16 @@ impl RaftService {
             .finish();
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
-
-        let cur_node = self.node.clone();
         info!("Listening on: http://{}", addr);
         loop {
             info!("At loop start!");
-            let mut node_lock = self.node.clone().lock().await;
-            if node_lock.is_follower() {
+            let mut node_lock = self.node.lock().await;
+            let mut state = NodeState::Follower;
+            {
+                state = node_lock.getState().clone();
+
+            }
+            if state == NodeState::Follower {
                 info!("Node is a follower");
                 let timeout_duration = Duration::from_millis(node_lock.get_timeout());
                 let result = timeout(timeout_duration, listener.accept()).await;
@@ -52,7 +56,6 @@ impl RaftService {
                         node_lock.become_candidate();
                         node_lock.reset_timeout();
                         drop(node_lock);
-                        continue;
                     }
                     Ok(result) => {
                         if let Err(_) = result {
@@ -66,37 +69,41 @@ impl RaftService {
                         }
                     }
                 };
-            } else if node_lock.is_candidate() {
+            } else if state == NodeState::Candidate {
                 info!("Node is a candidate");
                 let timeout_duration = Duration::from_millis(node_lock.timeout);
+                let mut set: JoinSet<()> = JoinSet::new();
                 // let result = timeout(timeout_duration, listener.accept()).await;
-                while !node_lock.check_majority() {
-                    // send out RequestVote requests to nodes
-                    for node in node_lock.get_network() {
+                if !node_lock.check_majority() {
+                    let now = SystemTime::now();
+                    let network = node_lock.get_network().clone();
+                    drop(node_lock);
+                    for node in network {
                         // start a tokio task that
                         // opens a TCP connection with that node
                         // awaits its response
                         // responds accordingly
-                        tokio::spawn(async move {
-                            let node_addr = SocketAddr::from(([127, 0, 0, 1], *node as u16));
+                        let new_node = self.node.clone();
+                        set.spawn(async move {
+                            let mut new_node_clone = new_node.clone();
+                            let node_addr = SocketAddr::from(([127, 0, 0, 1], node as u16));
                             let stream = TcpStream::connect(&addr).await.unwrap();
-                            let data = node_lock.send_request_vote();
+                            let new_node_lock = new_node_clone.lock().await;
+                            let data = new_node_lock.send_request_vote();
+                            drop(new_node_lock);
+
+                            // wait on the same stream for a response back
+                            
+
                         });
-
                         // worry about deadlocks?
-
-
                     }
-
-                    // for each response back, respond accordingly
-
                     // at the end of the loop, if the node isn't voted majority yet, reset election timeout
                     // and repeat
                     //RaftService::parse_response(node_lock.send_request_vote());
                 }
-
                 // else, the node is voted to become leader,
-                node_lock.become_leader();
+                self.node.lock().await.become_leader();
             } else {
                 // node is leader
 

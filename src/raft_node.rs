@@ -9,7 +9,7 @@ const MIN_ELECTION_DURATION: u64 = 150;
 const MAX_ELECTION_DURATION: u64 = 300;
 
 #[derive(Clone, PartialEq)]
-enum NodeState {
+pub enum NodeState {
     Leader,
     Follower,
     Candidate,
@@ -255,8 +255,8 @@ impl RaftNode {
         None
     }
 
-    pub fn send_append_entries(&self) -> AppendEntries {
-        AppendEntries {
+    pub fn send_append_entries(&self) -> String {
+        let message = RaftMessage::AE(AppendEntries {
             term: self.currentTerm,
             leaderId: self._id,
             prevLogIndex: self.log.len() as u32 - 1,
@@ -267,11 +267,12 @@ impl RaftNode {
             },
             entries: self.log.clone(),
             leaderCommit: self.commitIndex,
-        }
+        });
+        RaftNode::parse_response(message)
     }
 
-    pub fn send_request_vote(&self) -> RequestVote {
-        RequestVote {
+    pub fn send_request_vote(&self) -> String {
+        let message = RaftMessage::RV(RequestVote {
             term: self.currentTerm,
             candidateId: self._id,
             lastLogIndex: self.log.len() as u32 - 1,
@@ -280,10 +281,11 @@ impl RaftNode {
             } else {
                 self.currentTerm
             },
-        }
+        });
+        RaftNode::parse_response(message)
     }
 
-    pub fn check_majority(&mut self) -> bool {
+    pub fn check_majority(&self) -> bool {
         let inter = self.voteState.intersection(&self.network.nodes);
         let cnt = inter.count();
         return cnt >= (self.network.nodes.len()).div_ceil(2);
@@ -369,6 +371,10 @@ impl RaftNode {
 
     pub fn is_candidate(&self) -> bool {
         return self.state == NodeState::Candidate;
+    }
+
+    pub fn getState(&self) -> &NodeState {
+        return &self.state;
     }
 
     pub fn add_to_network(&mut self, node: u32) {
