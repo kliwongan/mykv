@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt, Interest};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::{Handle, Runtime};
 use tokio::sync::Mutex;
@@ -46,7 +46,7 @@ impl RaftService {
                 state = node_lock.getState().clone();
             }
             if state == NodeState::Follower {
-                info!("Node is a follower");
+                info!("Node is a follower, following");
                 let timeout_duration = Duration::from_millis(node_lock.get_timeout());
                 let result = timeout(timeout_duration, listener.accept()).await;
                 match result {
@@ -76,10 +76,9 @@ impl RaftService {
                     let mut set: JoinSet<String> = JoinSet::new();
                     let network = node_lock.get_network().clone();
                     let data = node_lock.send_request_vote();
-                    let data_clone = data.clone();
 
                     for node in network {
-                        let message = data_clone.clone();
+                        let message = data.clone();
                         set.spawn(async move {
                             let message = message.clone();
                             let node_addr = SocketAddr::from(([127, 0, 0, 1], node as u16));
@@ -137,10 +136,27 @@ impl RaftService {
                 // else, the node is voted to become leader,
                 self.node.lock().await.become_leader();
             } else {
-                // node is leader
-
                 // send out heartbeat requests for now
+                let network = node_lock.get_network().clone();
+                let mut set: JoinSet<()> = JoinSet::new();
+                let data = node_lock.send_append_entries(true);
+                drop(node_lock);
+                for node in network {
+                    let message = data.clone();
+                    set.spawn(async move { 
+                        let message = message.clone();
+                        let node_addr = SocketAddr::from(([127, 0, 0, 1], node as u16));
+                        let mut stream = TcpStream::connect(&node_addr).await.unwrap();
 
+                        stream.write_all(message.as_bytes()).await.unwrap();
+                    });
+                }
+
+                set.join_all().await;
+                // other than sending heartbeat requests
+                // we also have to deal with http requests from clients
+                // keeping track of appending entries to followers,
+                // persisting to disk, and snapshotting our goods
             }
         }
     }

@@ -83,6 +83,7 @@ struct AppendEntries {
     prevLogTerm: u32,
     entries: Vec<LogEntry>,
     leaderCommit: u32,
+    heartbeat: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -137,6 +138,106 @@ impl RaftNode {
         }
     }
 
+    pub fn send_request_vote(&self) -> String {
+        let message = RaftMessage::RV(RequestVote {
+            term: self.currentTerm,
+            candidateId: self._id,
+            lastLogIndex: self.log.len() as u32 - 1,
+            lastLogTerm: if self.log.len() as u32 - 1 >= 0 {
+                self.log.get(self.log.len() - 1).unwrap().term
+            } else {
+                self.currentTerm
+            },
+        });
+        RaftNode::parse_response(message)
+    }
+
+    pub fn request_vote_receiver(&mut self, args: RequestVote) -> RequestVoteReply {
+        let mut result = RequestVoteReply {
+            term: self.currentTerm,
+            voteGranted: false,
+            _id: self._id,
+        };
+
+        if self.currentTerm > args.term {
+            return result;
+        }
+
+        let last_entry = self.log.get((args.lastLogIndex - 1) as usize);
+        if self.votedFor.is_none()
+            && !last_entry.is_none()
+            && last_entry.unwrap().term == args.lastLogTerm
+        {
+            result.voteGranted = true;
+            self.votedFor = Some(args.candidateId);
+        }
+
+        return result;
+    }
+
+    pub fn request_vote_sender_response(&mut self, args: RequestVoteReply) {
+        if args.voteGranted {
+            self.voteState.insert(args._id);
+        } else if args.term >= self.currentTerm {
+            self.state = NodeState::Follower;
+        }
+    }
+
+    pub fn send_append_entries(&self, heartbeat: bool) -> String {
+        let message = RaftMessage::AE(AppendEntries {
+            term: self.currentTerm,
+            leaderId: self._id,
+            prevLogIndex: self.log.len() as u32 - 1,
+            prevLogTerm: if self.log.len() as u32 - 1 >= 0 {
+                self.log.get(self.log.len() - 1).unwrap().term
+            } else {
+                self.currentTerm
+            },
+            entries: self.log.clone(),
+            leaderCommit: self.commitIndex,
+            heartbeat: heartbeat,
+        });
+        RaftNode::parse_response(message)
+    }
+
+    pub fn append_entries_sender_response(
+        &mut self,
+        args: AppendEntriesReply,
+    ) -> Option<AppendEntries> {
+        if !args.success {
+            self.nextIndex
+                .insert(args._id, self.nextIndex.get(&args._id).unwrap() - 1);
+            let mut nextIndex = self.nextIndex.get(&args._id).unwrap().clone();
+
+            // minor AppendEntries optimization
+            let conflictingFirstIndex = args.conflictingFirstIndex;
+            let conflictingEntryTerm = args.conflictingEntryTerm;
+
+            if conflictingEntryTerm.is_some() && conflictingFirstIndex.is_some() {
+                let newIndex = conflictingFirstIndex.unwrap();
+                nextIndex = newIndex - 1;
+            }
+            let prevLogTerm = if self.log.len() as u32 - 1 >= 0 {
+                self.log.get(nextIndex as usize).unwrap().term
+            } else {
+                self.currentTerm
+            };
+
+            return Some(AppendEntries {
+                term: self.currentTerm,
+                leaderId: self._id,
+                prevLogIndex: nextIndex,
+                prevLogTerm: prevLogTerm,
+                entries: self.log.clone(),
+                leaderCommit: self.commitIndex,
+                heartbeat: false,
+            });
+        }
+        // Use voteState to maintain nodes that have already replicated our entries
+        self.voteState.insert(args._id);
+        None
+    }
+
     pub fn append_entries_receiver(&mut self, args: AppendEntries) -> AppendEntriesReply {
         let mut result = AppendEntriesReply {
             term: self.currentTerm,
@@ -145,6 +246,11 @@ impl RaftNode {
             conflictingFirstIndex: None,
             _id: self._id,
         };
+
+        if args.heartbeat {
+            result.success = true;
+            return result;
+        }
 
         if self.currentTerm != args.term {
             if self.currentTerm < args.term {
@@ -185,105 +291,6 @@ impl RaftNode {
         }
 
         return result;
-    }
-
-    pub fn request_vote_receiver(&mut self, args: RequestVote) -> RequestVoteReply {
-        let mut result = RequestVoteReply {
-            term: self.currentTerm,
-            voteGranted: false,
-            _id: self._id,
-        };
-
-        if self.currentTerm > args.term {
-            return result;
-        }
-
-        let last_entry = self.log.get((args.lastLogIndex - 1) as usize);
-        if self.votedFor.is_none()
-            && !last_entry.is_none()
-            && last_entry.unwrap().term == args.lastLogTerm
-        {
-            result.voteGranted = true;
-            self.votedFor = Some(args.candidateId);
-        }
-
-        return result;
-    }
-
-    pub fn request_vote_sender_response(&mut self, args: String) {
-        let args = RaftNode::parse_response(args);
-        if args.voteGranted {
-            self.voteState.insert(args._id);
-        } else if args.term >= self.currentTerm {
-            self.state = NodeState::Follower;
-        }
-    }
-
-    pub fn append_entries_sender_response(
-        &mut self,
-        args: AppendEntriesReply,
-    ) -> Option<AppendEntries> {
-        if !args.success {
-            self.nextIndex
-                .insert(args._id, self.nextIndex.get(&args._id).unwrap() - 1);
-            let mut nextIndex = self.nextIndex.get(&args._id).unwrap().clone();
-
-            // minor AppendEntries optimization
-            let conflictingFirstIndex = args.conflictingFirstIndex;
-            let conflictingEntryTerm = args.conflictingEntryTerm;
-
-            if conflictingEntryTerm.is_some() && conflictingFirstIndex.is_some() {
-                let newIndex = conflictingFirstIndex.unwrap();
-                nextIndex = newIndex - 1;
-            }
-            let prevLogTerm = if self.log.len() as u32 - 1 >= 0 {
-                self.log.get(nextIndex as usize).unwrap().term
-            } else {
-                self.currentTerm
-            };
-
-            return Some(AppendEntries {
-                term: self.currentTerm,
-                leaderId: self._id,
-                prevLogIndex: nextIndex,
-                prevLogTerm: prevLogTerm,
-                entries: self.log.clone(),
-                leaderCommit: self.commitIndex,
-            });
-        }
-        // Use voteState to maintain nodes that have already replicated our entries
-        self.voteState.insert(args._id);
-        None
-    }
-
-    pub fn send_append_entries(&self) -> String {
-        let message = RaftMessage::AE(AppendEntries {
-            term: self.currentTerm,
-            leaderId: self._id,
-            prevLogIndex: self.log.len() as u32 - 1,
-            prevLogTerm: if self.log.len() as u32 - 1 >= 0 {
-                self.log.get(self.log.len() - 1).unwrap().term
-            } else {
-                self.currentTerm
-            },
-            entries: self.log.clone(),
-            leaderCommit: self.commitIndex,
-        });
-        RaftNode::parse_response(message)
-    }
-
-    pub fn send_request_vote(&self) -> String {
-        let message = RaftMessage::RV(RequestVote {
-            term: self.currentTerm,
-            candidateId: self._id,
-            lastLogIndex: self.log.len() as u32 - 1,
-            lastLogTerm: if self.log.len() as u32 - 1 >= 0 {
-                self.log.get(self.log.len() - 1).unwrap().term
-            } else {
-                self.currentTerm
-            },
-        });
-        RaftNode::parse_response(message)
     }
 
     pub fn check_majority(&self) -> bool {
@@ -333,8 +340,6 @@ impl RaftNode {
         self.timeout = rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION);
     }
 
-    // NodeState related methods
-
     pub fn become_leader(&mut self) {
         self.voteState.clear();
         self.state = NodeState::Leader;
@@ -345,6 +350,7 @@ impl RaftNode {
     }
 
     pub fn become_candidate(&mut self) {
+        self.voteState.clear();
         self.incrementTerm();
         self.state = NodeState::Candidate;
         self.voteState.insert(self._id);
@@ -377,6 +383,10 @@ impl RaftNode {
     pub fn getState(&self) -> &NodeState {
         return &self.state;
     }
+
+    pub fn getLeader(&self) -> Option<u32> {
+        return self.votedFor;
+    }   
 
     pub fn add_to_network(&mut self, node: u32) {
         self.network.nodes.insert(node);
