@@ -142,8 +142,12 @@ impl RaftNode {
         let message = RaftMessage::RV(RequestVote {
             term: self.currentTerm,
             candidateId: self._id,
-            lastLogIndex: self.log.len() as u32 - 1,
-            lastLogTerm: if self.log.len() as u32 - 1 >= 0 {
+            lastLogIndex: if self.log.len() as u32 > 0 {
+                self.log.len() as u32 - 1
+            } else {
+                0
+            },
+            lastLogTerm: if self.log.len() as u32 > 0 {
                 self.log.get(self.log.len() - 1).unwrap().term
             } else {
                 self.currentTerm
@@ -152,7 +156,7 @@ impl RaftNode {
         RaftNode::parse_response(message)
     }
 
-    pub fn request_vote_receiver(&mut self, args: RequestVote) -> RequestVoteReply {
+    fn request_vote_receiver(&mut self, args: RequestVote) -> RequestVoteReply {
         let mut result = RequestVoteReply {
             term: self.currentTerm,
             voteGranted: false,
@@ -187,8 +191,12 @@ impl RaftNode {
         let message = RaftMessage::AE(AppendEntries {
             term: self.currentTerm,
             leaderId: self._id,
-            prevLogIndex: self.log.len() as u32 - 1,
-            prevLogTerm: if self.log.len() as u32 - 1 >= 0 {
+            prevLogIndex: if self.log.len() as u32 > 0 {
+                self.log.len() as u32 - 1
+            } else {
+                0
+            },
+            prevLogTerm: if self.log.len() as u32 > 0 {
                 self.log.get(self.log.len() - 1).unwrap().term
             } else {
                 self.currentTerm
@@ -217,7 +225,7 @@ impl RaftNode {
                 let newIndex = conflictingFirstIndex.unwrap();
                 nextIndex = newIndex - 1;
             }
-            let prevLogTerm = if self.log.len() as u32 - 1 >= 0 {
+            let prevLogTerm = if self.log.len() as u32 - 1 > 0 {
                 self.log.get(nextIndex as usize).unwrap().term
             } else {
                 self.currentTerm
@@ -386,7 +394,7 @@ impl RaftNode {
 
     pub fn getLeader(&self) -> Option<u32> {
         return self.votedFor;
-    }   
+    }
 
     pub fn add_to_network(&mut self, node: u32) {
         self.network.nodes.insert(node);

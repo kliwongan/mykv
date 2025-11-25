@@ -28,8 +28,14 @@ impl RaftService {
         }
     }
 
+    pub async fn add_network(&mut self, id: u32) {
+        let mut node_lock = self.node.lock().await;
+        node_lock.add_to_network(id);
+    }
+
     pub async fn run(&mut self) {
         let addr = SocketAddr::from(([127, 0, 0, 1], self.id as u16));
+        info!("Trying to bind TCPListener");
         let listener = TcpListener::bind(&addr).await.unwrap();
 
         let subscriber = FmtSubscriber::builder()
@@ -46,7 +52,11 @@ impl RaftService {
                 state = node_lock.getState().clone();
             }
             if state == NodeState::Follower {
-                info!("Node is a follower, following");
+                if let Some(leader) = node_lock.getLeader() {
+                    info!("Node is a follower, following {}", leader);
+                } else {
+                    info!("Node is a follower, following no one yet");
+                }
                 let timeout_duration = Duration::from_millis(node_lock.get_timeout());
                 let result = timeout(timeout_duration, listener.accept()).await;
                 match result {
@@ -73,17 +83,22 @@ impl RaftService {
                 let timeout_duration = Duration::from_millis(node_lock.timeout);
                 if !node_lock.check_majority() {
                     let now = SystemTime::now();
-                    let mut set: JoinSet<String> = JoinSet::new();
+                    let mut set: JoinSet<Result<String, Error>> = JoinSet::new();
                     let network = node_lock.get_network().clone();
                     let data = node_lock.send_request_vote();
 
                     for node in network {
+                        if node == self.id {
+                            continue;
+                        }
+
                         let message = data.clone();
                         set.spawn(async move {
                             let message = message.clone();
                             let node_addr = SocketAddr::from(([127, 0, 0, 1], node as u16));
-                            let mut stream = TcpStream::connect(&node_addr).await.unwrap();
-
+                            let mut stream = TcpStream::connect(&node_addr).await?;
+                            
+                            info!("Sending request vote to {}", node);
                             stream.write_all(message.as_bytes()).await.unwrap();
 
                             // wait on the same stream for a response back
@@ -103,7 +118,7 @@ impl RaftService {
                                         let response = String::from_utf8(buf.to_vec()).unwrap();
                                         info!("read {} bytes from the current node {} with response {}", n, node, response);
                                         // parse into RaftMessage and send it to 
-                                        return response;
+                                        return Ok(response);
 
                                     }
                                     Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
@@ -115,7 +130,7 @@ impl RaftService {
                                 }
                             }
 
-                            String::from("")
+                            Ok(String::from(""))
                         });
                     }
                     // at the end of the loop, if the node isn't voted majority yet, reset election timeout
@@ -130,7 +145,9 @@ impl RaftService {
 
                     // parse vote result
                     for message in vote_result {
-                        node_lock.execute_from_message(message.as_str());
+                        if let Ok(msg) = message {
+                            node_lock.execute_from_message(msg.as_str());
+                        }
                     }
                 }
                 // else, the node is voted to become leader,
@@ -142,8 +159,12 @@ impl RaftService {
                 let data = node_lock.send_append_entries(true);
                 drop(node_lock);
                 for node in network {
+                    if node == self.id {
+                        continue;
+                    }
+
                     let message = data.clone();
-                    set.spawn(async move { 
+                    set.spawn(async move {
                         let message = message.clone();
                         let node_addr = SocketAddr::from(([127, 0, 0, 1], node as u16));
                         let mut stream = TcpStream::connect(&node_addr).await.unwrap();
