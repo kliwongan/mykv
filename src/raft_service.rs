@@ -81,7 +81,12 @@ impl RaftService {
             } else if state == NodeState::Candidate {
                 info!("Node is a candidate");
                 let timeout_duration = Duration::from_millis(node_lock.timeout);
-                if !node_lock.check_majority() {
+                let mut check_majority = false;
+                {
+                    check_majority = node_lock.check_majority();
+                    
+                }
+                if !check_majority {
                     let now = SystemTime::now();
                     let mut set: JoinSet<Result<String, Error>> = JoinSet::new();
                     let network = node_lock.get_network().clone();
@@ -92,6 +97,7 @@ impl RaftService {
                             continue;
                         }
 
+                        info!("Going through node {}", node);
                         let message = data.clone();
                         set.spawn(async move {
                             let message = message.clone();
@@ -149,15 +155,22 @@ impl RaftService {
                             node_lock.execute_from_message(msg.as_str());
                         }
                     }
+                } else {
+                    // else, the node is voted to become leader,
+                    info!("Became leader due to majority!");
+                    node_lock.become_leader();
+                    drop(node_lock);
+                    continue;
                 }
-                // else, the node is voted to become leader,
-                self.node.lock().await.become_leader();
             } else {
                 // send out heartbeat requests for now
+                info!("Node is a leader!");
                 let network = node_lock.get_network().clone();
                 let mut set: JoinSet<()> = JoinSet::new();
                 let data = node_lock.send_append_entries(true);
+                info!("Dropping node lock");
                 drop(node_lock);
+                info!("Spawning heartbeat request tasks");
                 for node in network {
                     if node == self.id {
                         continue;
@@ -168,7 +181,8 @@ impl RaftService {
                         let message = message.clone();
                         let node_addr = SocketAddr::from(([127, 0, 0, 1], node as u16));
                         let mut stream = TcpStream::connect(&node_addr).await.unwrap();
-
+                        
+                        info!("Sending heartbeat to {}", node);
                         stream.write_all(message.as_bytes()).await.unwrap();
                     });
                 }
