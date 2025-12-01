@@ -1,48 +1,56 @@
-syntax = "proto3"
-package raft_service
+syntax = "proto3";
+package raft_service;
+
+import "google/protobuf/empty.proto";
 
 service RaftService {
-    rpc SendRequestVote returns (RequestVote);
+    rpc SendRequestVote (google.protobuf.Empty) returns (RequestVote);
     rpc RequestVoteReply (RequestVote) returns (RequestVoteResponse);
-    rpc SendAppendEntries returns (AppendEntries);
+    rpc SendAppendEntries (google.protobuf.Empty) returns (AppendEntries);
     rpc AppendEntriesReply (AppendEntries) returns (AppendEntriesResponse);
 }
 
 message RequestVote {
-    required uint32 term;
-    required uint32 candidate_id;
-    required uint32 last_log_index;
-    required uint32 last_log_term;
+    uint32 term = 1;
+    uint32 candidate_id = 2;
+    uint32 last_log_index = 3;
+    uint32 last_log_term = 4;
 }
 
 message RequestVoteResponse {
-    required uint32 term;
-    required bool vote_granted;
+    uint32 term = 1;
+    bool vote_granted = 2;
 }
 
 message AppendEntries {
-
     message LogEntry {
-        enum Command {
-            GET = 0
-            SET = 1
+        oneof Command {
+            message Get {
+                string key = 1;
+                string value = 2;
+            }
+
+            message Set {
+                string key = 1;
+            }
+
+            Get get = 1;
+            Set set = 2;
         }
 
-        required Command command = 2;
-        required uint32 term;
-        required string key;
-        string value;
+        Command command = 1;
+        uint32 term = 2;
     }
 
-    required uint32 term;
-    required uint32 candidate_id;
-    required uint32 prev_log_term;
-    required uint32 prev_log_index;
-    required uint32 leader_commit;
-    required repeated LogEntry entries;
+    uint32 term = 1;
+    uint32 candidate_id = 2;
+    uint32 prev_log_term = 3;
+    uint32 prev_log_index = 4;
+    uint32 leader_commit = 5;
+    repeated LogEntry entries = 6;
 }
 
 message AppendEntriesResponse {
-    required uint32 term;
-    required bool success;
+    uint32 term = 1;
+    bool success = 2;
 }
