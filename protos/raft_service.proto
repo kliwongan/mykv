@@ -1,0 +1,48 @@
+syntax = "proto3"
+package raft_service
+
+service RaftService {
+    rpc SendRequestVote returns (RequestVote);
+    rpc RequestVoteReply (RequestVote) returns (RequestVoteResponse);
+    rpc SendAppendEntries returns (AppendEntries);
+    rpc AppendEntriesReply (AppendEntries) returns (AppendEntriesResponse);
+}
+
+message RequestVote {
+    required uint32 term;
+    required uint32 candidate_id;
+    required uint32 last_log_index;
+    required uint32 last_log_term;
+}
+
+message RequestVoteResponse {
+    required uint32 term;
+    required bool vote_granted;
+}
+
+message AppendEntries {
+
+    message LogEntry {
+        enum Command {
+            GET = 0
+            SET = 1
+        }
+
+        required Command command = 2;
+        required uint32 term;
+        required string key;
+        string value;
+    }
+
+    required uint32 term;
+    required uint32 candidate_id;
+    required uint32 prev_log_term;
+    required uint32 prev_log_index;
+    required uint32 leader_commit;
+    required repeated LogEntry entries;
+}
+
+message AppendEntriesResponse {
+    required uint32 term;
+    required bool success;
+}

@@ -7,7 +7,7 @@ use raft_service::RaftService;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use clap::{arg, Parser, command, value_parser, ArgAction, Command};
+use clap::{ArgAction, Command, Parser, arg, command, value_parser};
 
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -24,7 +24,7 @@ pub struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
     let args = Args::parse();
     let raft_node = Arc::new(Mutex::new(RaftNode::new(args.id)));
     let mut service = RaftService::new(args.id, raft_node);
@@ -36,5 +36,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Running service");
     service.run().await;
-    Ok(())
 }

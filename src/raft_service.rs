@@ -64,6 +64,7 @@ impl RaftService {
                         info!("Becoming a candidate because timeout was reached");
                         node_lock.become_candidate();
                         node_lock.reset_timeout();
+                        info!("Timeout is now {}", node_lock.get_timeout());
                         drop(node_lock);
                     }
                     Ok(result) => {
@@ -71,10 +72,8 @@ impl RaftService {
                             error!("Error in receiving RPC");
                             continue;
                         } else {
-                            let rt = Runtime::new().unwrap();
-                            let handle = rt.handle();
                             drop(node_lock);
-                            handle_request(Arc::clone(&self.node), result, handle.clone());
+                            handle_request(Arc::clone(&self.node), result);
                         }
                     }
                 };
@@ -84,7 +83,6 @@ impl RaftService {
                 let mut check_majority = false;
                 {
                     check_majority = node_lock.check_majority();
-                    
                 }
                 if !check_majority {
                     let now = SystemTime::now();
@@ -102,8 +100,17 @@ impl RaftService {
                         set.spawn(async move {
                             let message = message.clone();
                             let node_addr = SocketAddr::from(([127, 0, 0, 1], node as u16));
-                            let mut stream = TcpStream::connect(&node_addr).await?;
-                            
+                            let mut stream: TcpStream;
+
+                            loop {
+                                let tcp = TcpStream::connect(&node_addr).await;
+                                if let Ok(inner) = tcp {
+                                    stream = inner;
+                                    break;
+                                } else {
+                                    error!("Couldn't connect, trying again");
+                                }
+                            }
                             info!("Sending request vote to {}", node);
                             stream.write_all(message.as_bytes()).await.unwrap();
 
@@ -132,6 +139,7 @@ impl RaftService {
                                     }
                                     Err(e) => {
                                         error!("{} (Error for node {})", e, node);
+                                        break;
                                     }
                                 }
                             }
@@ -141,20 +149,44 @@ impl RaftService {
                     }
                     // at the end of the loop, if the node isn't voted majority yet, reset election timeout
                     // and repeat
-                    let vote_result = set.join_all().await;
-                    if (now.elapsed().unwrap() > timeout_duration) {
-                        // increment term and start new election
-                        node_lock.incrementTerm();
-                        drop(node_lock);
-                        continue;
-                    }
-
-                    // parse vote result
-                    for message in vote_result {
-                        if let Ok(msg) = message {
-                            node_lock.execute_from_message(msg.as_str());
+                    //let vote_result = set.join_all().await;
+                    info!("Determining vote result");
+                    let vote_result = timeout(timeout_duration, set.join_all()).await;
+                    // if (now.elapsed().unwrap() > timeout_duration) {
+                    //     // increment term and start new election
+                    //     node_lock.incrementTerm();
+                    //     drop(node_lock);
+                    //     continue;
+                    // }
+                    match vote_result {
+                        Err(_) => {
+                            info!("Timeout was reached, restarting vote");
+                            node_lock.incrementTerm();
+                            node_lock.reset_timeout();
+                            info!("Timeout is now {}", node_lock.get_timeout());
+                            drop(node_lock);
+                            continue;
                         }
-                    }
+                        Ok(result) => {
+                            info!("Parsing vote result");
+                            for message in result {
+                                if let Ok(msg) = message {
+                                    node_lock.execute_from_message(msg.as_str());
+                                }
+                            }
+
+                            if node_lock.check_majority() {
+                                info!("Majority was reached");
+                                node_lock.become_leader();
+                            } else {
+                                info!("Nothing much, resetting timeout and starting a new vote!");
+                                node_lock.incrementTerm();
+                                node_lock.reset_timeout();
+                                info!("Timeout is now {}", node_lock.get_timeout());
+                            }
+                            drop(node_lock);
+                        }
+                    };
                 } else {
                     // else, the node is voted to become leader,
                     info!("Became leader due to majority!");
@@ -180,8 +212,18 @@ impl RaftService {
                     set.spawn(async move {
                         let message = message.clone();
                         let node_addr = SocketAddr::from(([127, 0, 0, 1], node as u16));
-                        let mut stream = TcpStream::connect(&node_addr).await.unwrap();
-                        
+                        let mut stream: TcpStream;
+
+                        loop {
+                            let tcp = TcpStream::connect(&node_addr).await;
+                            if let Ok(inner) = tcp {
+                                stream = inner;
+                                break;
+                            } else {
+                                error!("Couldn't connect, trying again");
+                            }
+                        }
+
                         info!("Sending heartbeat to {}", node);
                         stream.write_all(message.as_bytes()).await.unwrap();
                     });
@@ -197,10 +239,10 @@ impl RaftService {
     }
 }
 
-fn handle_basic_http_request(result: Result<(TcpStream, SocketAddr), Error>, handle: Handle) {
+fn handle_basic_http_request(result: Result<(TcpStream, SocketAddr), Error>) {
     // dummy function for testing purposes
     let (mut stream, mut address) = result.unwrap();
-    handle.spawn(async move {
+    tokio::spawn(async move {
         info!("Serving request!");
         let mut buffer = [0; 1024];
         let _ = stream.read(&mut buffer).await;
@@ -216,10 +258,9 @@ fn handle_basic_http_request(result: Result<(TcpStream, SocketAddr), Error>, han
 async fn handle_request(
     node: Arc<Mutex<RaftNode>>,
     result: Result<(TcpStream, SocketAddr), Error>,
-    handle: Handle,
 ) {
     let (mut stream, mut address) = result.unwrap();
-    handle.spawn(async move {
+    tokio::spawn(async move {
         let cur_node = Arc::clone(&node);
         let mut node_lock = cur_node.lock().await;
         info!("Deserializing request!");

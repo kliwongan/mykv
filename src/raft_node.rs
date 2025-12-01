@@ -17,7 +17,7 @@ pub enum NodeState {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 enum Command {
-    Set { key: String, value: i32 },
+    Set { key: String, value: String },
     Get { key: String },
 }
 
@@ -304,7 +304,7 @@ impl RaftNode {
     pub fn check_majority(&self) -> bool {
         let inter = self.voteState.intersection(&self.network.nodes);
         let cnt = inter.count();
-        return cnt >= (self.network.nodes.len()).div_ceil(2);
+        return cnt > (self.network.nodes.len()).div_ceil(2);
     }
 
     pub fn execute_from_message(&mut self, message: &str) -> String {
