@@ -13,7 +13,16 @@ use tokio::time::timeout;
 use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
+use tonic;
+
 use crate::raft_node::{NodeState, RaftNode};
+
+pub mod raftrpc {
+    tonic::include_proto!("raft_service");
+}
+
+use raftrpc::route_guide_server::{RouteGuide, RouteGuideServer};
+use raftrpc::{Feature, Point, Rectangle, RouteNote, RouteSummary};
 
 pub struct RaftService {
     node: Arc<Mutex<RaftNode>>,

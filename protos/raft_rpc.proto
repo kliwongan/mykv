@@ -3,7 +3,7 @@ package raft_service;
 
 import "google/protobuf/empty.proto";
 
-service RaftService {
+service RaftRPC {
     rpc SendRequestVote (google.protobuf.Empty) returns (RequestVote);
     rpc RequestVoteReply (RequestVote) returns (RequestVoteResponse);
     rpc SendAppendEntries (google.protobuf.Empty) returns (AppendEntries);
@@ -23,23 +23,21 @@ message RequestVoteResponse {
 }
 
 message AppendEntries {
+    message Get {
+        string key = 1;
+        string value = 2;
+    }
+
+    message Set {
+        string key = 1;
+    }
+
     message LogEntry {
         oneof Command {
-            message Get {
-                string key = 1;
-                string value = 2;
-            }
-
-            message Set {
-                string key = 1;
-            }
-
             Get get = 1;
             Set set = 2;
         }
-
-        Command command = 1;
-        uint32 term = 2;
+        uint32 term = 3;
     }
 
     uint32 term = 1;
