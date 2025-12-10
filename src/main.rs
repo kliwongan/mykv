@@ -1,4 +1,5 @@
 mod raft_node;
+mod raft_rpc;
 mod raft_service;
 
 use raft_node::RaftNode;

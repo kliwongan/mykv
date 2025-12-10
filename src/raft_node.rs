@@ -3,10 +3,14 @@ use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
+use prost::{Message};
+use crate::raft_rpc::raftrpc::{RequestVote, RequestVoteResponse, };
 
 // Based on the recommended values from the Raft paper
 const MIN_ELECTION_DURATION: u64 = 150;
 const MAX_ELECTION_DURATION: u64 = 300;
+
+use crate::raft_service;
 
 #[derive(Clone, PartialEq)]
 pub enum NodeState {
@@ -60,20 +64,20 @@ pub struct RaftNode {
     pub network: NetworkConfig,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-struct RequestVote {
-    term: u32,
-    candidateId: u32,
-    lastLogIndex: u32,
-    lastLogTerm: u32,
-}
+// #[derive(Clone, Serialize, Deserialize, Debug)]
+// struct RequestVote {
+//     term: u32,
+//     candidateId: u32,
+//     lastLogIndex: u32,
+//     lastLogTerm: u32,
+// }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct RequestVoteReply {
-    term: u32,
-    voteGranted: bool,
-    _id: u32,
-}
+// #[derive(Clone, Serialize, Deserialize, Debug)]
+// pub struct RequestVoteResponse {
+//     term: u32,
+//     voteGranted: bool,
+//     _id: u32,
+// }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 struct AppendEntries {
@@ -112,7 +116,7 @@ pub enum RaftMessage {
     RV(RequestVote),
     IS(InstallSnapshot),
     AE_R(AppendEntriesReply),
-    RV_R(RequestVoteReply),
+    RV_R(RequestVoteResponse),
     IS_R(InstallSnapshotReply),
     Nil,
 }
@@ -138,28 +142,27 @@ impl RaftNode {
         }
     }
 
-    pub fn send_request_vote(&self) -> String {
-        let message = RaftMessage::RV(RequestVote {
+    pub fn send_request_vote(&self) -> RequestVote {
+        RequestVote {
             term: self.currentTerm,
-            candidateId: self._id,
-            lastLogIndex: if self.log.len() as u32 > 0 {
+            candidate_id: self._id,
+            last_log_index: if self.log.len() as u32 > 0 {
                 self.log.len() as u32 - 1
             } else {
                 0
             },
-            lastLogTerm: if self.log.len() as u32 > 0 {
+            last_log_term: if self.log.len() as u32 > 0 {
                 self.log.get(self.log.len() - 1).unwrap().term
             } else {
                 self.currentTerm
             },
-        });
-        RaftNode::parse_response(message)
+        }
     }
 
-    fn request_vote_receiver(&mut self, args: RequestVote) -> RequestVoteReply {
-        let mut result = RequestVoteReply {
+    fn request_vote_receiver(&mut self, args: RequestVote) -> RequestVoteResponse {
+        let mut result = RequestVoteResponse {
             term: self.currentTerm,
-            voteGranted: false,
+            vote_granted: false,
             _id: self._id,
         };
 
@@ -179,7 +182,7 @@ impl RaftNode {
         return result;
     }
 
-    pub fn request_vote_sender_response(&mut self, args: RequestVoteReply) {
+    pub fn request_vote_sender_response(&mut self, args: RequestVoteResponse) {
         if args.voteGranted {
             self.voteState.insert(args._id);
         } else if args.term >= self.currentTerm {
