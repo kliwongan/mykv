@@ -20,9 +20,10 @@ message RequestVote {
 message RequestVoteResponse {
     uint32 term = 1;
     bool vote_granted = 2;
+    uint32 id = 3;
 }
 
-message AppendEntries {
+message LogEntry {
     message Get {
         string key = 1;
         string value = 2;
@@ -32,16 +33,16 @@ message AppendEntries {
         string key = 1;
     }
 
-    message LogEntry {
-        oneof Command {
-            Get get = 1;
-            Set set = 2;
-        }
-        uint32 term = 3;
+    oneof Command {
+        Get get = 1;
+        Set set = 2;
     }
+    uint32 term = 3;
+}
 
+message AppendEntries {
     uint32 term = 1;
-    uint32 candidate_id = 2;
+    uint32 leader_id = 2;
     uint32 prev_log_term = 3;
     uint32 prev_log_index = 4;
     uint32 leader_commit = 5;
@@ -51,4 +52,7 @@ message AppendEntries {
 message AppendEntriesResponse {
     uint32 term = 1;
     bool success = 2;
+    uint32 id = 3;
+    optional uint32 conflicting_first_index = 4;
+    optional uint32 conflicting_entry_term = 5;
 }

@@ -1,13 +1,14 @@
-use tonic;
-use prost::{Message};
+use prost::Message;
+use tonic::{Request, Response, Status};
 
 pub mod raftrpc {
     tonic::include_proto!("raft_service");
 }
 
+use raftrpc::log_entry::{Command, Get, Set};
 use raftrpc::raft_rpc_client::RaftRpcClient;
 use raftrpc::raft_rpc_server::{RaftRpc, RaftRpcServer};
-use raftrpc::{AppendEntries, AppendEntriesResponse, RequestVote, RequestVoteResponse};
+use raftrpc::{AppendEntries, AppendEntriesResponse, LogEntry, RequestVote, RequestVoteResponse};
 
 use crate::raft_service::RaftService;
 
@@ -15,26 +16,38 @@ use crate::raft_service::RaftService;
 impl RaftRpc for RaftService {
     async fn send_request_vote(
         &self,
-        request: tonic::Request<()>,
+        _request: tonic::Request<()>,
     ) -> std::result::Result<tonic::Response<RequestVote>, tonic::Status> {
-        return send_request_vote(&self);
+        let node = self.get_node();
+        let node_lock = node.lock().await;
+        Ok(Response::new(node_lock.send_request_vote()))
     }
     async fn request_vote_reply(
         &self,
         request: tonic::Request<RequestVote>,
     ) -> std::result::Result<tonic::Response<RequestVoteResponse>, tonic::Status> {
-        unimplemented!();
+        let node = self.get_node();
+        let mut node_lock = node.lock().await;
+        Ok(Response::new(
+            node_lock.request_vote_receiver(request.into_inner()),
+        ))
     }
     async fn send_append_entries(
         &self,
-        request: tonic::Request<()>,
+        _request: tonic::Request<()>,
     ) -> std::result::Result<tonic::Response<AppendEntries>, tonic::Status> {
-        unimplemented!();
+        let node = self.get_node();
+        let node_lock = node.lock().await;
+        Ok(Response::new(node_lock.send_append_entries()))
     }
     async fn append_entries_reply(
         &self,
         request: tonic::Request<AppendEntries>,
     ) -> std::result::Result<tonic::Response<AppendEntriesResponse>, tonic::Status> {
-        unimplemented!();
+        let node = self.get_node();
+        let mut node_lock = node.lock().await;
+        Ok(Response::new(
+            node_lock.append_entries_receiver(request.into_inner()),
+        ))
     }
 }

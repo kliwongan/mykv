@@ -28,6 +28,10 @@ impl RaftService {
         }
     }
 
+    pub fn get_node(&self) -> Arc<Mutex<RaftNode>> {
+        self.node.clone()
+    }
+
     pub async fn add_network(&mut self, id: u32) {
         let mut node_lock = self.node.lock().await;
         node_lock.add_to_network(id);
@@ -112,7 +116,7 @@ impl RaftService {
                                 }
                             }
                             info!("Sending request vote to {}", node);
-                            stream.write_all(message.as_bytes()).await.unwrap();
+                            //stream.write_all(message.as_bytes()).await.unwrap();
 
                             // wait on the same stream for a response back
                             loop {
@@ -171,7 +175,7 @@ impl RaftService {
                             info!("Parsing vote result");
                             for message in result {
                                 if let Ok(msg) = message {
-                                    node_lock.execute_from_message(msg.as_str());
+                                    //node_lock.execute_from_message(msg.as_str());
                                 }
                             }
 
@@ -199,7 +203,7 @@ impl RaftService {
                 info!("Node is a leader!");
                 let network = node_lock.get_network().clone();
                 let mut set: JoinSet<()> = JoinSet::new();
-                let data = node_lock.send_append_entries(true);
+                let data = node_lock.send_append_entries();
                 info!("Dropping node lock");
                 drop(node_lock);
                 info!("Spawning heartbeat request tasks");
@@ -225,7 +229,7 @@ impl RaftService {
                         }
 
                         info!("Sending heartbeat to {}", node);
-                        stream.write_all(message.as_bytes()).await.unwrap();
+                        //stream.write_all(message.as_bytes()).await.unwrap();
                     });
                 }
 
@@ -269,7 +273,8 @@ async fn handle_request(
 
         let message = String::from_utf8(buffer.to_vec()).unwrap();
         info!("{}", format!("{}: {}", "Message", &message));
-        let response = node_lock.execute_from_message(&message);
+        //let response = node_lock.execute_from_message(&message);
+        let response = "loll";
 
         // now write the response back
         let _ = stream.write_all(response.as_bytes()).await;
