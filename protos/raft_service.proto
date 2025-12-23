@@ -1,0 +1,69 @@
+syntax = "proto3";
+package raft_service;
+
+// Inspired from riteraft
+
+import "google/protobuf/empty.proto";
+
+enum EntryType {
+    Normal = 0;
+    ConfChange = 1;
+}
+
+message Entry {
+    EntryType entry_type = 0;
+    uint64 term = 1;
+    uint64 commit_index = 2;
+    bytes data = 3;
+}
+
+message KV {
+    uint64 key = 1;
+    string value = 2;
+}
+
+// TODO: snapshotting and membership change logic
+
+enum MessageType {
+    Beat = 1;
+    Propose = 2;
+    Append = 3;
+    AppendResponse = 4;
+    RequestVote = 5;
+    RequestVoteResponse = 6;
+    Heartbeat = 7;
+    HeartbeatResponse = 8;
+    Unreachable = 9;
+    CheckQuorum = 10;
+    ReadIndex = 11;
+    ReadIndexResponse = 12;
+}
+
+message RaftMessage {
+    MessageType msg_type = 1;
+    uint64 sender = 2;
+    uint64 from = 3;
+    uint64 log_term = 4;
+    uint64 index = 5;
+    repeated Entry entries = 6;
+}
+
+enum ConfChangeType {
+    AddNode    = 0;
+    RemoveNode = 1;
+    AddFollowerNode = 2;
+}
+
+message ConfChange {
+    uint64 id = 1;
+    ConfChangeType change_type = 2;
+    uint64 node_id = 3;
+    bytes context = 4;
+}
+
+service RaftService {
+    // TODO for RequestID; not completed
+    rpc RequestId (RequestIdArgs) returns (RaftMessage);
+    rpc ChangeConf (ConfChange) returns (RaftMessage);
+    rpc SendMessage (RaftMessage) returns (RaftMessage);
+}

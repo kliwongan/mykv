@@ -23,6 +23,11 @@ struct NetworkConfig {
     nodes: HashSet<u32>,
 }
 
+pub struct RaftConfig {
+    // config object for 
+}
+
+// Raft state machine + consensus/timing
 #[derive(Clone)]
 pub struct RaftNode {
     pub id: u32,
@@ -43,7 +48,7 @@ pub struct RaftNode {
     // State of the current node
     pub state: NodeState,
 
-    // Election timeouts
+    // Election timeout jitter (randomizer)
     pub timeout: u64,
 
     // Implementation based state

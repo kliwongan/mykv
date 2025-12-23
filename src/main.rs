@@ -1,9 +1,10 @@
 mod raft_node;
 mod raft_rpc;
+mod raft_server;
 mod raft_service;
 
 use raft_node::RaftNode;
-use raft_service::RaftService;
+use raft_server::RaftServer;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -28,13 +29,13 @@ pub struct Args {
 async fn main() {
     let args = Args::parse();
     let raft_node = Arc::new(Mutex::new(RaftNode::new(args.id)));
-    let mut service = RaftService::new(args.id, raft_node);
+    let mut server = RaftServer::new(args.id, raft_node);
     println!("{:?}", args);
     for node in args.network {
         println!("Adding node {} to network", node);
-        service.add_network(node).await;
+        server.add_network(node).await;
     }
 
     println!("Running service");
-    service.run().await;
+    server.run().await;
 }
