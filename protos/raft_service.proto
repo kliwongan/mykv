@@ -61,6 +61,10 @@ message ConfChange {
     bytes context = 4;
 }
 
+message RequestIdArgs {
+  string addr = 1;
+}
+
 service RaftService {
     // TODO for RequestID; not completed
     rpc RequestId (RequestIdArgs) returns (RaftMessage);

@@ -24,7 +24,7 @@ struct NetworkConfig {
 }
 
 pub struct RaftConfig {
-    // config object for 
+    // config object for  
 }
 
 // Raft state machine + consensus/timing
