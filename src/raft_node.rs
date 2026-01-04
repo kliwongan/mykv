@@ -1,15 +1,13 @@
-use crate::raft_rpc::raftrpc::log_entry::{Command, Get, Set};
 use crate::raft_rpc::raftrpc::{
-    AppendEntries, AppendEntriesResponse, LogEntry, RequestVote, RequestVoteResponse,
+    RaftMessage,
 };
-use prost::Message;
 use rand::Rng;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 
 // Based on the recommended values from the Raft paper
-const MIN_ELECTION_DURATION: u64 = 150;
-const MAX_ELECTION_DURATION: u64 = 300;
+const MIN_ELECTION_DURATION: usize = 150;
+const MAX_ELECTION_DURATION: usize = 300;
 
 #[derive(Clone, PartialEq)]
 pub enum NodeState {
@@ -24,12 +22,12 @@ struct NetworkConfig {
 }
 
 pub struct RaftConfig {
-    // config object for  
+    // config object for RaftNode
 }
 
 // Raft state machine + consensus/timing
 #[derive(Clone)]
-pub struct RaftNode {
+pub struct RaftNode<T: Storage> {
     pub id: u32,
 
     // Persistent state
@@ -41,15 +39,21 @@ pub struct RaftNode {
     pub commit_index: u32,
     pub last_applied: u32,
 
+    // Timeout variables
+    pub heartbeat_timeout: usize,
+    pub election_timeout: usize,
+    pub randomized_timeout: usize,
+
+    // Internal time state variables
+    pub election_elapsed: usize,
+    pub heartbeat_elapsed: usize,
+
     // Leader state (volatile) only
     pub next_index: HashMap<u32, u32>,
     pub match_index: HashMap<u32, u32>,
 
     // State of the current node
     pub state: NodeState,
-
-    // Election timeout jitter (randomizer)
-    pub timeout: u64,
 
     // Implementation based state
     pub vote_state: HashSet<u32>,
@@ -69,12 +73,65 @@ impl RaftNode {
             next_index: HashMap::new(),
             match_index: HashMap::new(),
             state: NodeState::Follower,
-            timeout: rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION),
+            randomized_timeout: rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION),
             vote_state: HashSet::new(),
             network: NetworkConfig {
                 nodes: HashSet::new(),
             },
+            election_elapsed: 0,
+            heartbeat_elapsed: 0,
+            heartbeat_timeout: 0,
+            election_timeout: 0,
         }
+    }
+
+    pub fn tick(&mut self) -> bool {
+        match self.state {
+            NodeState::Candidate | NodeState::Follower => self.tick_election(),
+            NodeState::Leader => self.tick_heartbeat(),
+        }
+    }
+
+    pub fn tick_election(&mut self) -> bool {
+        self.election_elapsed += 1;
+        if self.election_elapsed >= self.randomized_timeout {
+            return false;
+        }
+
+        self.election_elapsed = 0;
+        // create new message to send out elections and step into it
+        // self.step(m)
+        true
+    }
+
+    pub fn tick_heartbeat(&mut self) -> bool {
+        self.election_elapsed += 1;
+        self.heartbeat_elapsed += 1;
+
+        if self.election_elapsed >= self.election_timeout {
+            self.election_elapsed = 0;
+            // get new message here and step through the msg
+            // self.step()
+        }
+
+        if self.state != NodeState::Leader {
+            return false;
+        }
+
+        if self.heartbeat_elapsed >= self.heartbeat_timeout {
+            self.heartbeat_elapsed = 0;
+             // get new message here and step through the msg
+            // self.step()
+        }
+        true
+    }
+
+    pub fn step(&mut self, m: RaftMessage) {
+        // we step through messages here
+    }
+
+    fn new_message() -> RaftMessage {
+        
     }
 
     pub fn send_request_vote(&self) -> RequestVote {
