@@ -1,7 +1,7 @@
 mod raft_node;
 mod raft_rpc;
 mod raft_server;
-mod raft_service;
+mod storage;
 
 use raft_node::RaftNode;
 use raft_server::RaftServer;

@@ -1,6 +1,7 @@
 use crate::raft_rpc::raftrpc::{
-    RaftMessage,
+    RaftMessage, Entry, MessageType,
 };
+use crate::storage::{Storage};
 use rand::Rng;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
@@ -26,14 +27,13 @@ pub struct RaftConfig {
 }
 
 // Raft state machine + consensus/timing
-#[derive(Clone)]
 pub struct RaftNode<T: Storage> {
     pub id: u32,
 
     // Persistent state
     pub current_term: u32,
     pub voted_for: Option<u32>,
-    pub log: Vec<LogEntry>,
+    pub log: Vec<Entry>,
 
     // Volatile state
     pub commit_index: u32,
@@ -58,16 +58,19 @@ pub struct RaftNode<T: Storage> {
     // Implementation based state
     pub vote_state: HashSet<u32>,
     pub network: NetworkConfig,
+
+    // Storage
+    pub store: T,
 }
 
-impl RaftNode {
-    pub fn new(id: u32) -> Self {
+impl<T: Storage> RaftNode<T> {
+    pub fn new(id: u32, store: T) -> Self {
         let mut rng = rand::rng();
         RaftNode {
             id: id,
             current_term: 1,
             voted_for: None,
-            log: Vec::<LogEntry>::new(),
+            log: Vec::<Entry>::new(),
             commit_index: 0,
             last_applied: 0,
             next_index: HashMap::new(),
@@ -82,6 +85,7 @@ impl RaftNode {
             heartbeat_elapsed: 0,
             heartbeat_timeout: 0,
             election_timeout: 0,
+            store: store,
         }
     }
 
@@ -108,26 +112,44 @@ impl RaftNode {
         self.election_elapsed += 1;
         self.heartbeat_elapsed += 1;
 
+        let mut ready = false;
         if self.election_elapsed >= self.election_timeout {
             self.election_elapsed = 0;
             // get new message here and step through the msg
             // self.step()
+            ready = true;
         }
 
         if self.state != NodeState::Leader {
-            return false;
+            return ready;
         }
 
         if self.heartbeat_elapsed >= self.heartbeat_timeout {
             self.heartbeat_elapsed = 0;
              // get new message here and step through the msg
             // self.step()
+            ready = true;
         }
-        true
+        ready
     }
 
     pub fn step(&mut self, m: RaftMessage) {
         // we step through messages here
+        
+        // follower logic
+        if self.term < m.log_term {
+            // if requestvote, then we give it the vote
+            // if we're not already following a leader
+            if m.msg_type == MessageType::RequestVote {
+                
+            }
+        } else {
+
+        }
+
+        // leader logic; send out message
+
+
     }
 
     fn new_message() -> RaftMessage {
