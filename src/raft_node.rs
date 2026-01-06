@@ -1,8 +1,11 @@
-use crate::raft_rpc::raftrpc::{Entry, MessageType, RaftMessage};
-use crate::storage::Storage;
 use rand::Rng;
+use core::error::Error;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
+
+use crate::raft_rpc::raftrpc::{Entry, MessageType, RaftMessage};
+use crate::storage::Storage;
+
 
 // Based on the recommended values from the Raft paper
 const MIN_ELECTION_DURATION: usize = 150;
@@ -172,12 +175,13 @@ impl<T: Storage> RaftNode<T> {
             // if append entries, we reject and say term is greater
             // if heartbeat, reject and tell your term
 
-            // so basically baring some checkquorum and prevote shenanigans,
+            // so basically barring some checkquorum and prevote shenanigans,
             // with checking logs, commit indexes, etc
             // we basically ignore, for now
         }
 
         // now we match by message type?
+        // the cases that are handled here should be if self.term <= m.log_term
         match m.msg_type {
             MessageType::RequestVote => {
                 // if we already voted for the same node already,
@@ -199,33 +203,77 @@ impl<T: Storage> RaftNode<T> {
         }
     }
 
-    fn step_leader(&mut self, m: RaftMessage) {
+    fn step_leader(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
         match m.msg_type {
             MessageType::Beat => {
                 // send heartbeat out
-            }
-        }
+            },
+        };
 
         // separate match for response types
         match m.msg_type {
             _ => {
 
             }
-        }
+        };
+        Ok(())
     }
 
-    fn step_candidate(&mut self, m: RaftMessage) {
-        match m.msg_type() {
-            
-        }
+    fn step_candidate(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
+        match m.msg_type {
+           MessageType::Propose => {
+                // reject proposal since there is no evident leader
+            },
+            MessageType::Heartbeat => {
+                // become a follower if we detect a leader
+                // in the same or greater term
+            },
+            MessageType::Append => {
+                // append new things to log
+                // and then become a follower
+                // send append response
+            },
+            MessageType::RequestVoteResponse => {
+                // handle vote responses
+                // note that fn step handles votes
+            }
+        };
+        Ok(())
     }
 
-    fn step_follower(&mut self, m: RaftMessage) {
-        unimplemented!();
+    fn step_follower(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
+        match m.msg_type {
+            // TODO: proposal forwarding to leader?
+            MessageType::Propose => {
+                // TODO: proposal forwarding to leader?
+            },
+            MessageType::Heartbeat => {
+                self.election_elapsed = 0;
+                // send back heartbeat response
+            },
+            MessageType::Append => {
+                self.election_elapsed = 0;
+                // append new things to log
+            },
+        };
+        Ok(())
     }
 
-    fn new_message() -> RaftMessage {
-        unimplemented!();
+    fn new_message(mtype: MessageType, to: u64, from: Option<u64>) -> RaftMessage {
+        let mut retval = RaftMessage {
+            msg_type: 0,
+            log_term: 0,
+            index: 0,
+            entries: Vec::new(),
+            from: if let Some(t) = from {
+                t
+            } else {
+                0
+            },
+            sender: to,
+        };
+        retval.set_msg_type(mtype);
+        retval
     }
 
     pub fn send_request_vote(&self) -> RequestVote {
