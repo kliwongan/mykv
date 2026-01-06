@@ -33,6 +33,7 @@ pub struct RaftNode<T: Storage> {
     // Persistent state
     pub term: u64,
     pub voted_for: Option<u64>,
+    pub leader_id: u64,
     pub log: Vec<Entry>,
 
     // Volatile state
@@ -136,24 +137,78 @@ impl<T: Storage> RaftNode<T> {
     pub fn step(&mut self, m: RaftMessage) {
         // we step through messages here
         
-        // follower logic
         if self.term < m.log_term {
-            // if requestvote, then we give it the vote
-            // if we're not already following a leader
+            // if requestvote received, then we give it the vote
+            // as long as it doesn't hear from a leader within the minimum election timeout 
+            // due to leader completeness, 
             if m.msg_type == MessageType::RequestVote {
-                
+                let not_avail = self.voted_for.is_some() && self.election_elapsed < self.election_timeout;
+                if not_avail {
+                    // ignore the vote and log it
+                    return;
+                }
             }
-        } else {
 
+            // we received a messae from a higher term
+            // log it here
+            
+            // what happens if we receive a message from a higher term here?
+            // if the message is an appendentries, or heartbeat, simply follow
+
+            // TODO: Snapshot
+            if m.msg_type == MessageType::Append || m.msg_type == MessageType::Heartbeat {
+                self.become_follower();
+            } else {
+                // TODO: become follower in different ways?
+                self.become_follower();
+            }
+
+        } else if self.term > m.log_term {
+            // if the current term is greater
+
+            // if requestvote, reject
+            // if append entries, we reject and say term is greater
+            // if heartbeat, reject and tell your term
+
+            // so basically baring some checkquorum and prevote shenanigans,
+            // with checking logs, commit indexes, etc
+            // we basically ignore, for now
         }
 
-        // leader logic; send out message
+        // now we match by message type?
+        match m.msg_type {
+            MessageType::RequestVote => {
+                // if we already voted for the same node already,
+                // or if we don't think there's a leader and we haven't voted yet
+                let vote = self.voted_for == m.from && self.voted_for.is_none();
+                //  if the above is met AND the log is up to date
+                // accept the vote
+                if vote && log_up_to_date {
 
+                } else {
+                    // else reject
+                }
+            },
+            _ => {
+                match self.state {
+                    NodeState::Leader => self.step_leader(m);
+                    Nodestate::Candidate => self.step_candidate(m);
+                    NodeState::Follower => self.step_follower(m);
+                }
+            }
+        }
+    }
 
+    fn step_leader(&mut self) {
+        unimplemented!();
+    }
+
+    fn step_candidate(&mut self) {
+        unimplemented!();
     }
 
     fn new_message() -> RaftMessage {
-        
+        unimplemented!();
     }
 
     pub fn send_request_vote(&self) -> RequestVote {
