@@ -1,7 +1,5 @@
-use crate::raft_rpc::raftrpc::{
-    RaftMessage, Entry, MessageType,
-};
-use crate::storage::{Storage};
+use crate::raft_rpc::raftrpc::{Entry, MessageType, RaftMessage};
+use crate::storage::Storage;
 use rand::Rng;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
@@ -71,6 +69,7 @@ impl<T: Storage> RaftNode<T> {
             id: id,
             term: 0,
             voted_for: None,
+            leader_id: 0,
             log: Vec::<Entry>::new(),
             commit_index: 0,
             last_applied: 0,
@@ -127,7 +126,7 @@ impl<T: Storage> RaftNode<T> {
 
         if self.heartbeat_elapsed >= self.heartbeat_timeout {
             self.heartbeat_elapsed = 0;
-             // get new message here and step through the msg
+            // get new message here and step through the msg
             // self.step()
             ready = true;
         }
@@ -136,33 +135,36 @@ impl<T: Storage> RaftNode<T> {
 
     pub fn step(&mut self, m: RaftMessage) {
         // we step through messages here
-        
+
         if self.term < m.log_term {
             // if requestvote received, then we give it the vote
-            // as long as it doesn't hear from a leader within the minimum election timeout 
-            // due to leader completeness, 
+            // as long as it doesn't hear from a leader within the minimum election timeout
+            // due to leader completeness,
             if m.msg_type == MessageType::RequestVote {
-                let not_avail = self.voted_for.is_some() && self.election_elapsed < self.election_timeout;
+                let not_avail =
+                    self.voted_for.is_some() && self.election_elapsed < self.election_timeout;
                 if not_avail {
                     // ignore the vote and log it
                     return;
                 }
             }
 
-            // we received a messae from a higher term
+            // we received a message from a higher term
             // log it here
-            
+
             // what happens if we receive a message from a higher term here?
             // if the message is an appendentries, or heartbeat, simply follow
 
             // TODO: Snapshot
             if m.msg_type == MessageType::Append || m.msg_type == MessageType::Heartbeat {
+                // this node is the leader to the best of our knowledge since it's sending the commands
+                // if not then eventually we will find the right leader
                 self.become_follower();
             } else {
-                // TODO: become follower in different ways?
+                // becomes a follower with no idea who the leader is
+                // since we can't guarantee this node is the leader
                 self.become_follower();
             }
-
         } else if self.term > m.log_term {
             // if the current term is greater
 
@@ -180,30 +182,45 @@ impl<T: Storage> RaftNode<T> {
             MessageType::RequestVote => {
                 // if we already voted for the same node already,
                 // or if we don't think there's a leader and we haven't voted yet
-                let vote = self.voted_for == m.from && self.voted_for.is_none();
+                let vote = self.voted_for.is_none() || self.voted_for == m.from;
                 //  if the above is met AND the log is up to date
+                let log_up_to_date = true;
                 // accept the vote
                 if vote && log_up_to_date {
-
                 } else {
                     // else reject
                 }
+            }
+            _ => match self.state {
+                NodeState::Leader => self.step_leader(m),
+                Nodestate::Candidate => self.step_candidate(m),
+                NodeState::Follower => self.step_follower(m),
             },
+        }
+    }
+
+    fn step_leader(&mut self, m: RaftMessage) {
+        match m.msg_type {
+            MessageType::Beat => {
+                // send heartbeat out
+            }
+        }
+
+        // separate match for response types
+        match m.msg_type {
             _ => {
-                match self.state {
-                    NodeState::Leader => self.step_leader(m);
-                    Nodestate::Candidate => self.step_candidate(m);
-                    NodeState::Follower => self.step_follower(m);
-                }
+
             }
         }
     }
 
-    fn step_leader(&mut self) {
-        unimplemented!();
+    fn step_candidate(&mut self, m: RaftMessage) {
+        match m.msg_type() {
+            
+        }
     }
 
-    fn step_candidate(&mut self) {
+    fn step_follower(&mut self, m: RaftMessage) {
         unimplemented!();
     }
 

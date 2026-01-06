@@ -29,10 +29,7 @@ pub struct RaftServer {
 
 impl RaftServer {
     pub fn new(id: u32, node: Arc<Mutex<RaftNode>>) -> RaftServer {
-        RaftServer {
-            node: node,
-            id: id,
-        }
+        RaftServer { node: node, id: id }
     }
 
     pub async fn run(&mut self) {
@@ -42,7 +39,6 @@ impl RaftServer {
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
         //info!("Listening on: http://{}", addr);
-        
     }
 }
 
@@ -85,5 +81,3 @@ impl RaftService for RaftServer {
         ))
     }
 }
-
-
