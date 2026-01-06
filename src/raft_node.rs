@@ -19,7 +19,7 @@ pub enum NodeState {
 
 #[derive(Clone)]
 struct NetworkConfig {
-    nodes: HashSet<u32>,
+    nodes: HashSet<u64>,
 }
 
 pub struct RaftConfig {
@@ -28,16 +28,16 @@ pub struct RaftConfig {
 
 // Raft state machine + consensus/timing
 pub struct RaftNode<T: Storage> {
-    pub id: u32,
+    pub id: u64,
 
     // Persistent state
-    pub current_term: u32,
-    pub voted_for: Option<u32>,
+    pub term: u64,
+    pub voted_for: Option<u64>,
     pub log: Vec<Entry>,
 
     // Volatile state
-    pub commit_index: u32,
-    pub last_applied: u32,
+    pub commit_index: u64,
+    pub last_applied: u64,
 
     // Timeout variables
     pub heartbeat_timeout: usize,
@@ -49,14 +49,14 @@ pub struct RaftNode<T: Storage> {
     pub heartbeat_elapsed: usize,
 
     // Leader state (volatile) only
-    pub next_index: HashMap<u32, u32>,
-    pub match_index: HashMap<u32, u32>,
+    pub next_index: HashMap<u64, u64>,
+    pub match_index: HashMap<u64, u64>,
 
     // State of the current node
     pub state: NodeState,
 
     // Implementation based state
-    pub vote_state: HashSet<u32>,
+    pub vote_state: HashSet<u64>,
     pub network: NetworkConfig,
 
     // Storage
@@ -64,11 +64,11 @@ pub struct RaftNode<T: Storage> {
 }
 
 impl<T: Storage> RaftNode<T> {
-    pub fn new(id: u32, store: T) -> Self {
+    pub fn new(id: u64, store: T) -> Self {
         let mut rng = rand::rng();
         RaftNode {
             id: id,
-            current_term: 1,
+            term: 0,
             voted_for: None,
             log: Vec::<Entry>::new(),
             commit_index: 0,
@@ -160,12 +160,12 @@ impl<T: Storage> RaftNode<T> {
         RequestVote {
             term: self.current_term,
             candidate_id: self.id,
-            last_log_index: if self.log.len() as u32 > 0 {
-                self.log.len() as u32 - 1
+            last_log_index: if self.log.len() as u64 > 0 {
+                self.log.len() as u64 - 1
             } else {
                 0
             },
-            last_log_term: if self.log.len() as u32 > 0 {
+            last_log_term: if self.log.len() as u64 > 0 {
                 self.log.get(self.log.len() - 1).unwrap().term
             } else {
                 self.current_term
@@ -208,12 +208,12 @@ impl<T: Storage> RaftNode<T> {
         AppendEntries {
             term: self.current_term,
             leader_id: self.id,
-            prev_log_index: if self.log.len() as u32 > 0 {
-                self.log.len() as u32 - 1
+            prev_log_index: if self.log.len() as u64 > 0 {
+                self.log.len() as u64 - 1
             } else {
                 0
             },
-            prev_log_term: if self.log.len() as u32 > 0 {
+            prev_log_term: if self.log.len() as u64 > 0 {
                 self.log.get(self.log.len() - 1).unwrap().term
             } else {
                 self.current_term
@@ -240,7 +240,7 @@ impl<T: Storage> RaftNode<T> {
                 let new_index = conflicting_first_index.unwrap();
                 next_index = new_index - 1;
             }
-            let prev_log_term = if self.log.len() as u32 - 1 > 0 {
+            let prev_log_term = if self.log.len() as u64 - 1 > 0 {
                 self.log.get(next_index as usize).unwrap().term
             } else {
                 self.current_term
@@ -291,7 +291,7 @@ impl<T: Storage> RaftNode<T> {
 
                 // Delete this entry and all following entries
                 self.log
-                    .truncate((self.log.len() as u32 - args.prev_log_index + 1) as usize);
+                    .truncate((self.log.len() as u64 - args.prev_log_index + 1) as usize);
             }
             result.success = true;
         } else {
@@ -304,7 +304,7 @@ impl<T: Storage> RaftNode<T> {
         }
 
         if args.leader_commit > self.commit_index {
-            self.commit_index = min(args.leader_commit, self.log.len() as u32);
+            self.commit_index = min(args.leader_commit, self.log.len() as u64);
         }
 
         return result;
@@ -341,11 +341,11 @@ impl<T: Storage> RaftNode<T> {
         self.vote_state.insert(self.id);
     }
 
-    pub fn setTerm(&mut self, term: u32) {
+    pub fn setTerm(&mut self, term: u64) {
         self.current_term = term;
     }
 
-    pub fn getTerm(&self) -> u32 {
+    pub fn getTerm(&self) -> u64 {
         return self.current_term;
     }
 
@@ -369,15 +369,15 @@ impl<T: Storage> RaftNode<T> {
         return &self.state;
     }
 
-    pub fn getLeader(&self) -> Option<u32> {
+    pub fn getLeader(&self) -> Option<u64> {
         return self.voted_for;
     }
 
-    pub fn add_to_network(&mut self, node: u32) {
+    pub fn add_to_network(&mut self, node: u64) {
         self.network.nodes.insert(node);
     }
 
-    pub fn get_network(&self) -> &HashSet<u32> {
+    pub fn get_network(&self) -> &HashSet<u64> {
         &self.network.nodes
     }
 }
