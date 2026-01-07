@@ -1,11 +1,10 @@
-use rand::Rng;
 use core::error::Error;
+use rand::Rng;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 
 use crate::raft_rpc::raftrpc::{Entry, MessageType, RaftMessage};
 use crate::storage::Storage;
-
 
 // Based on the recommended values from the Raft paper
 const MIN_ELECTION_DURATION: usize = 150;
@@ -136,19 +135,19 @@ impl<T: Storage> RaftNode<T> {
         ready
     }
 
-    pub fn step(&mut self, m: RaftMessage) {
+    pub fn step(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>>{
         // we step through messages here
 
         if self.term < m.log_term {
             // if requestvote received, then we give it the vote
             // as long as it doesn't hear from a leader within the minimum election timeout
             // due to leader completeness,
-            if m.msg_type == MessageType::RequestVote {
+            if m.msg_type == MessageType::RequestVote as i32 {
                 let not_avail =
                     self.voted_for.is_some() && self.election_elapsed < self.election_timeout;
                 if not_avail {
                     // ignore the vote and log it
-                    return;
+                    return Ok(());
                 }
             }
 
@@ -159,7 +158,7 @@ impl<T: Storage> RaftNode<T> {
             // if the message is an appendentries, or heartbeat, simply follow
 
             // TODO: Snapshot
-            if m.msg_type == MessageType::Append || m.msg_type == MessageType::Heartbeat {
+            if m.msg_type == (MessageType::Append as i32) || m.msg_type == (MessageType::Heartbeat as i32) {
                 // this node is the leader to the best of our knowledge since it's sending the commands
                 // if not then eventually we will find the right leader
                 self.become_follower();
@@ -182,11 +181,11 @@ impl<T: Storage> RaftNode<T> {
 
         // now we match by message type?
         // the cases that are handled here should be if self.term <= m.log_term
-        match m.msg_type {
-            MessageType::RequestVote => {
+        match MessageType::try_from(m.msg_type) {
+            Ok(MessageType::RequestVote) => {
                 // if we already voted for the same node already,
                 // or if we don't think there's a leader and we haven't voted yet
-                let vote = self.voted_for.is_none() || self.voted_for == m.from;
+                let vote = self.voted_for.is_none() || self.voted_for == Some(m.from);
                 //  if the above is met AND the log is up to date
                 let log_up_to_date = true;
                 // accept the vote
@@ -196,44 +195,42 @@ impl<T: Storage> RaftNode<T> {
                 }
             }
             _ => match self.state {
-                NodeState::Leader => self.step_leader(m),
-                Nodestate::Candidate => self.step_candidate(m),
-                NodeState::Follower => self.step_follower(m),
+                NodeState::Leader => self.step_leader(m)?,
+                NodeState::Candidate => self.step_candidate(m)?,
+                NodeState::Follower => self.step_follower(m)?,
             },
-        }
+        };
     }
 
     fn step_leader(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
-        match m.msg_type {
-            MessageType::Beat => {
+        match MessageType::try_from(m.msg_type) {
+            Ok(MessageType::Beat) => {
                 // send heartbeat out
-            },
+            }
         };
 
         // separate match for response types
         match m.msg_type {
-            _ => {
-
-            }
+            _ => {}
         };
         Ok(())
     }
 
     fn step_candidate(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
-        match m.msg_type {
-           MessageType::Propose => {
+        match MessageType::try_from(m.msg_type) {
+            Ok(MessageType::Propose) => {
                 // reject proposal since there is no evident leader
-            },
-            MessageType::Heartbeat => {
+            }
+            Ok(MessageType::Heartbeat) => {
                 // become a follower if we detect a leader
                 // in the same or greater term
-            },
-            MessageType::Append => {
+            }
+            Ok(MessageType::Append) => {
                 // append new things to log
                 // and then become a follower
                 // send append response
-            },
-            MessageType::RequestVoteResponse => {
+            }
+            Ok(MessageType::RequestVoteResponse) => {
                 // handle vote responses
                 // note that fn step handles votes
             }
@@ -242,19 +239,19 @@ impl<T: Storage> RaftNode<T> {
     }
 
     fn step_follower(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
-        match m.msg_type {
+        match MessageType::try_from(m.msg_type) {
             // TODO: proposal forwarding to leader?
-            MessageType::Propose => {
+            Ok(MessageType::Propose) => {
                 // TODO: proposal forwarding to leader?
-            },
-            MessageType::Heartbeat => {
+            }
+            Ok(MessageType::Heartbeat) => {
                 self.election_elapsed = 0;
                 // send back heartbeat response
-            },
-            MessageType::Append => {
+            }
+            Ok(MessageType::Append) => {
                 self.election_elapsed = 0;
                 // append new things to log
-            },
+            }
         };
         Ok(())
     }
@@ -265,11 +262,7 @@ impl<T: Storage> RaftNode<T> {
             log_term: 0,
             index: 0,
             entries: Vec::new(),
-            from: if let Some(t) = from {
-                t
-            } else {
-                0
-            },
+            from: if let Some(t) = from { t } else { 0 },
             sender: to,
         };
         retval.set_msg_type(mtype);
