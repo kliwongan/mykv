@@ -2,6 +2,7 @@ use core::error::Error;
 use rand::Rng;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
+use tracing::{Level, error, info, debug};
 
 use crate::raft_rpc::raftrpc::{Entry, MessageType, RaftMessage};
 use crate::storage::Storage;
@@ -9,6 +10,7 @@ use crate::storage::Storage;
 // Based on the recommended values from the Raft paper
 const MIN_ELECTION_DURATION: usize = 150;
 const MAX_ELECTION_DURATION: usize = 300;
+const INVALID_ID: u64 = 0;
 
 #[derive(Clone, PartialEq)]
 pub enum NodeState {
@@ -62,6 +64,9 @@ pub struct RaftNode<T: Storage> {
 
     // Storage
     pub store: T,
+
+    // Message state
+    pub msgs: Vec<RaftMessage>
 }
 
 impl<T: Storage> RaftNode<T> {
@@ -98,6 +103,7 @@ impl<T: Storage> RaftNode<T> {
         }
     }
 
+    // For followers and candidates to tick the election timer
     pub fn tick_election(&mut self) -> bool {
         self.election_elapsed += 1;
         if self.election_elapsed >= self.randomized_timeout {
@@ -107,18 +113,24 @@ impl<T: Storage> RaftNode<T> {
         self.election_elapsed = 0;
         // create new message to send out elections and step into it
         // self.step(m)
+        // TODO: Since I don't have a hup type message, skip for now?
         true
     }
 
     pub fn tick_heartbeat(&mut self) -> bool {
+        // This function is run by leaders
         self.election_elapsed += 1;
         self.heartbeat_elapsed += 1;
 
         let mut ready = false;
         if self.election_elapsed >= self.election_timeout {
             self.election_elapsed = 0;
+            // Currently don't have a check quorum function here
+            // skip until it's needed
+            
             // get new message here and step through the msg
-            // self.step()
+            // let m = new_message(MessageType::);
+            // self.step(m);
             ready = true;
         }
 
@@ -128,8 +140,9 @@ impl<T: Storage> RaftNode<T> {
 
         if self.heartbeat_elapsed >= self.heartbeat_timeout {
             self.heartbeat_elapsed = 0;
-            // get new message here and step through the msg
-            // self.step()
+            // Send out a heartbeat
+            let m = Self::new_message(MessageType::Heartbeat, Some(self.id), INVALID_ID);
+            self.step(m);
             ready = true;
         }
         ready
@@ -137,7 +150,7 @@ impl<T: Storage> RaftNode<T> {
 
     pub fn step(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>>{
         // we step through messages here
-
+        let message_log = format!("Received a message from {}, of MessageType {:?}", m.from, Ok(MessageType::try_from(m.msg_type)));
         if self.term < m.log_term {
             // if requestvote received, then we give it the vote
             // as long as it doesn't hear from a leader within the minimum election timeout
@@ -147,15 +160,18 @@ impl<T: Storage> RaftNode<T> {
                     self.voted_for.is_some() && self.election_elapsed < self.election_timeout;
                 if not_avail {
                     // ignore the vote and log it
+                    let log = format!("Ignoring the vote from {} since this node either voted for someone or has not exceeded the timeout limit", m.from);
+                    info!(log);
                     return Ok(());
                 }
             }
 
             // we received a message from a higher term
             // log it here
-
+            info!(message_log);
             // what happens if we receive a message from a higher term here?
             // if the message is an appendentries, or heartbeat, simply follow
+            
 
             // TODO: Snapshot
             if m.msg_type == (MessageType::Append as i32) || m.msg_type == (MessageType::Heartbeat as i32) {
@@ -169,7 +185,7 @@ impl<T: Storage> RaftNode<T> {
             }
         } else if self.term > m.log_term {
             // if the current term is greater
-
+            
             // if requestvote, reject
             // if append entries, we reject and say term is greater
             // if heartbeat, reject and tell your term
@@ -177,6 +193,8 @@ impl<T: Storage> RaftNode<T> {
             // so basically barring some checkquorum and prevote shenanigans,
             // with checking logs, commit indexes, etc
             // we basically ignore, for now
+            message_log.push_str("\nRejecting the request since it is a lower term");
+            info!(message_log);
         }
 
         // now we match by message type?
@@ -206,6 +224,7 @@ impl<T: Storage> RaftNode<T> {
         match MessageType::try_from(m.msg_type) {
             Ok(MessageType::Beat) => {
                 // send heartbeat out
+                
             }
         };
 
@@ -256,17 +275,47 @@ impl<T: Storage> RaftNode<T> {
         Ok(())
     }
 
-    fn new_message(mtype: MessageType, to: u64, from: Option<u64>) -> RaftMessage {
+    fn new_message(mtype: MessageType, from: Option<u64>, to: u64) -> RaftMessage {
         let mut retval = RaftMessage {
             msg_type: 0,
             log_term: 0,
             index: 0,
             entries: Vec::new(),
             from: if let Some(t) = from { t } else { 0 },
-            sender: to,
+            to: to,
         };
         retval.set_msg_type(mtype);
         retval
+    }
+
+    pub fn send(&self, m: RaftMessage, msgs: &mut Vec<RaftMessage>) {
+        // Send a message
+        debug!("Attempting to send message from {} to {}", m.from, m.to);
+
+        // includes any prevote stuff too if I get to do it
+        if m.msg_type == MessageType::RequestVote as i32  || m.get_msg_type() == MessageType::RequestVoteResponse as i32 {
+            if m.log_term == 0 {
+                error!("The term should be nonzero and set when sending {:?}", MessageType::try_from(m.msg_type));
+                return;
+            }
+        } else {
+            // I guess the term shouldn't be set here since we find out from the logs, but...
+            // it's a bit unnecessary? leave in for now
+            if m.log_term != 0 {
+                error!("The term should not be set when sendinf {:?}", MessageType::try_from(m.msg_type));
+                return;
+            }
+
+            // TODO: understand this logic
+            if m.msg_type != MessageType::Propose as i32 && m.msg_type != MessageType::ReadIndex as i32 {
+                m.log_term = self.term;
+            }
+
+            // set msg priority here for requestvote or prevote when I implement it
+            // TODO
+        }   
+
+        msgs.push(m);
     }
 
     pub fn send_request_vote(&self) -> RequestVote {

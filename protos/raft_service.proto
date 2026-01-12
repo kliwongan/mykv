@@ -42,7 +42,7 @@ enum MessageType {
 
 message RaftMessage {
     MessageType msg_type = 1;
-    uint64 sender = 2;
+    uint64 to = 2;
     uint64 from = 3;
     uint64 log_term = 4;
     uint64 index = 5;
