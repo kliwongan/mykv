@@ -60,7 +60,7 @@ pub struct RaftNode<T: Storage> {
 
     // Implementation based state
     pub vote_state: HashSet<u64>,
-    pub network: NetworkConfig,
+    pub network: HashSet<u64>,
 
     // Storage
     pub store: T,
@@ -85,9 +85,7 @@ impl<T: Storage> RaftNode<T> {
             state: NodeState::Follower,
             randomized_timeout: rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION),
             vote_state: HashSet::new(),
-            network: NetworkConfig {
-                nodes: HashSet::new(),
-            },
+            network: HashSet::new(),
             election_elapsed: 0,
             heartbeat_elapsed: 0,
             heartbeat_timeout: 0,
@@ -247,14 +245,26 @@ impl<T: Storage> RaftNode<T> {
     fn step_leader(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
         match MessageType::try_from(m.msg_type) {
             Ok(MessageType::Beat) => {
-                // send heartbeat out
-                let msg = Self::new_message(MessageType::Heartbeat, Some(self.id), m.from);
+                // TODO turn into method later
+                let lst = self.network.clone();
+                for node in lst {
+                    if node != self.id {
+                        let mut msg = m.clone();
+                        msg.to = node;
+                        self.send(msg);
+                    }
+                }
+            }
+            _ => {
+                // TODO
             }
         };
 
         // separate match for response types
-        match m.msg_type {
-            _ => {}
+        match MessageType::try_from(m.msg_type) {
+            _ => {
+
+            }
         };
         Ok(())
     }
@@ -267,18 +277,22 @@ impl<T: Storage> RaftNode<T> {
             Ok(MessageType::Heartbeat) => {
                 // become a follower if we detect a leader
                 // in the same or greater term
+                if self.term == m.log_term {
+                    self.become_follower();
+                }
             }
             Ok(MessageType::Append) => {
                 // append new things to log
                 // and then become a follower
                 // send append response
+                self.become_follower();
             }
             Ok(MessageType::RequestVoteResponse) => {
                 // handle vote responses
                 // note that fn step handles votes
             }
             _ => {
-                
+
             }
         };
         Ok(())
@@ -292,7 +306,11 @@ impl<T: Storage> RaftNode<T> {
             }
             Ok(MessageType::Heartbeat) => {
                 self.election_elapsed = 0;
+                self.leader_id = m.from;
                 // send back heartbeat response
+                // TODO: turn into method
+                let msg = Self::new_message(MessageType::HeartbeatResponse, Some(self.id), m.from);
+                self.send(msg);
             }
             Ok(MessageType::Append) => {
                 self.election_elapsed = 0;
