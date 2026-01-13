@@ -151,10 +151,10 @@ impl<T: Storage> RaftNode<T> {
 
     pub fn step(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
         // we step through messages here
-        let message_log = format!(
+        let mut message_log = format!(
             "Received a message from {}, of MessageType {:?}",
             m.from,
-            Ok(MessageType::try_from(m.msg_type))
+            MessageType::try_from(m.msg_type),
         );
         if self.term < m.log_term {
             // if requestvote received, then we give it the vote
@@ -203,7 +203,7 @@ impl<T: Storage> RaftNode<T> {
             // with checking logs, commit indexes, etc
             // we basically ignore, for now
             let m = Self::new_message(MessageType::AppendResponse, None, m.from);
-            self.send(m, &mut self.msgs);
+            self.send(m);
             message_log.push_str("\nRejecting the request since it is a lower term");
             info!(message_log);
         }
@@ -225,13 +225,13 @@ impl<T: Storage> RaftNode<T> {
                 // accept the vote
                 if vote && log_up_to_date {
                     to_send.reject = false;
-                    self.send(m, &mut self.msgs);
                     self.election_elapsed = 0;
                     self.voted_for = Some(m.from);
+                    self.send(m);
                 } else {
                     // else reject
                     to_send.reject = true;
-                    self.send(m, &mut self.msgs);
+                    self.send(m);
                 }
             }
             _ => match self.state {
@@ -240,12 +240,15 @@ impl<T: Storage> RaftNode<T> {
                 NodeState::Follower => self.step_follower(m)?,
             },
         };
+
+        Ok(())
     }
 
     fn step_leader(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
         match MessageType::try_from(m.msg_type) {
             Ok(MessageType::Beat) => {
                 // send heartbeat out
+                let msg = Self::new_message(MessageType::Heartbeat, Some(self.id), m.from);
             }
         };
 
@@ -274,6 +277,9 @@ impl<T: Storage> RaftNode<T> {
                 // handle vote responses
                 // note that fn step handles votes
             }
+            _ => {
+                
+            }
         };
         Ok(())
     }
@@ -291,6 +297,9 @@ impl<T: Storage> RaftNode<T> {
             Ok(MessageType::Append) => {
                 self.election_elapsed = 0;
                 // append new things to log
+            }
+            _ => {
+
             }
         };
         Ok(())
@@ -312,7 +321,9 @@ impl<T: Storage> RaftNode<T> {
         retval
     }
 
-    pub fn send(&self, mut m: RaftMessage, msgs: &mut Vec<RaftMessage>) {
+    pub fn send(&mut self, mut m: RaftMessage) {
+        // TODO: Change to &self once I solve the problem
+
         // Send a message
         debug!("Attempting to send message from {} to {}", m.from, m.to);
 
@@ -348,7 +359,7 @@ impl<T: Storage> RaftNode<T> {
             // set msg priority here for requestvote or prevote when I implement it
             // TODO
         }
-        msgs.push(m);
+        self.msgs.push(m);
     }
 
     pub fn send_request_vote(&self) -> RequestVote {
