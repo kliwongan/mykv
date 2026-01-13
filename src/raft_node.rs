@@ -2,7 +2,7 @@ use core::error::Error;
 use rand::Rng;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
-use tracing::{Level, error, info, debug};
+use tracing::{Level, debug, error, info};
 
 use crate::raft_rpc::raftrpc::{Entry, MessageType, RaftMessage};
 use crate::storage::Storage;
@@ -66,7 +66,7 @@ pub struct RaftNode<T: Storage> {
     pub store: T,
 
     // Message state
-    pub msgs: Vec<RaftMessage>
+    pub msgs: Vec<RaftMessage>,
 }
 
 impl<T: Storage> RaftNode<T> {
@@ -128,7 +128,7 @@ impl<T: Storage> RaftNode<T> {
             self.election_elapsed = 0;
             // Currently don't have a check quorum function here
             // skip until it's needed
-            
+
             // get new message here and step through the msg
             // let m = new_message(MessageType::);
             // self.step(m);
@@ -149,9 +149,13 @@ impl<T: Storage> RaftNode<T> {
         ready
     }
 
-    pub fn step(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>>{
+    pub fn step(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
         // we step through messages here
-        let message_log = format!("Received a message from {}, of MessageType {:?}", m.from, Ok(MessageType::try_from(m.msg_type)));
+        let message_log = format!(
+            "Received a message from {}, of MessageType {:?}",
+            m.from,
+            Ok(MessageType::try_from(m.msg_type))
+        );
         if self.term < m.log_term {
             // if requestvote received, then we give it the vote
             // as long as it doesn't hear from a leader within the minimum election timeout
@@ -161,7 +165,10 @@ impl<T: Storage> RaftNode<T> {
                     self.voted_for.is_some() && self.election_elapsed < self.election_timeout;
                 if not_avail {
                     // ignore the vote and log it
-                    let log = format!("Ignoring the vote from {} since this node either voted for someone or has not exceeded the timeout limit", m.from);
+                    let log = format!(
+                        "Ignoring the vote from {} since this node either voted for someone or has not exceeded the timeout limit",
+                        m.from
+                    );
                     info!(log);
                     return Ok(());
                 }
@@ -172,10 +179,11 @@ impl<T: Storage> RaftNode<T> {
             info!(message_log);
             // what happens if we receive a message from a higher term here?
             // if the message is an appendentries, or heartbeat, simply follow
-            
 
             // TODO: Snapshot
-            if m.msg_type == (MessageType::Append as i32) || m.msg_type == (MessageType::Heartbeat as i32) {
+            if m.msg_type == (MessageType::Append as i32)
+                || m.msg_type == (MessageType::Heartbeat as i32)
+            {
                 // this node is the leader to the best of our knowledge since it's sending the commands
                 // if not then eventually we will find the right leader
                 self.become_follower();
@@ -186,7 +194,7 @@ impl<T: Storage> RaftNode<T> {
             }
         } else if self.term > m.log_term {
             // if the current term is greater
-            
+
             // if requestvote, reject
             // if append entries, we reject and say term is greater
             // if heartbeat, reject and tell your term
@@ -210,7 +218,8 @@ impl<T: Storage> RaftNode<T> {
                 let vote = self.voted_for.is_none() || self.voted_for == Some(m.from);
                 //  if the above is met AND the log is up to date
                 let log_up_to_date = true;
-                let mut to_send = Self::new_message(MessageType::RequestVoteResponse, Some(m.to), m.from);
+                let mut to_send =
+                    Self::new_message(MessageType::RequestVoteResponse, Some(m.to), m.from);
                 to_send.reject = true;
                 to_send.log_term = m.log_term;
                 // accept the vote
@@ -237,7 +246,6 @@ impl<T: Storage> RaftNode<T> {
         match MessageType::try_from(m.msg_type) {
             Ok(MessageType::Beat) => {
                 // send heartbeat out
-                
             }
         };
 
@@ -296,6 +304,9 @@ impl<T: Storage> RaftNode<T> {
             entries: Vec::new(),
             from: if let Some(t) = from { t } else { 0 },
             to: to,
+            commit_index: None,
+            commit_term: None,
+            reject: false,
         };
         retval.set_msg_type(mtype);
         retval
@@ -306,21 +317,31 @@ impl<T: Storage> RaftNode<T> {
         debug!("Attempting to send message from {} to {}", m.from, m.to);
 
         // includes any prevote stuff too if I get to do it
-        if m.msg_type == MessageType::RequestVote as i32  || m.msg_type == MessageType::RequestVoteResponse as i32 {
+        if m.msg_type == MessageType::RequestVote as i32
+            || m.msg_type == MessageType::RequestVoteResponse as i32
+        {
             if m.log_term == 0 {
-                error!("The term should be nonzero and set when sending {:?}", MessageType::try_from(m.msg_type));
+                error!(
+                    "The term should be nonzero and set when sending {:?}",
+                    MessageType::try_from(m.msg_type)
+                );
                 return;
             }
         } else {
             // I guess the term shouldn't be set here since we find out from the logs, but...
             // it's a bit unnecessary? leave in for now
             if m.log_term != 0 {
-                error!("The term should not be set when sendinf {:?}", MessageType::try_from(m.msg_type));
+                error!(
+                    "The term should not be set when sendinf {:?}",
+                    MessageType::try_from(m.msg_type)
+                );
                 return;
             }
 
             // TODO: understand this logic
-            if m.msg_type != MessageType::Propose as i32 && m.msg_type != MessageType::ReadIndex as i32 {
+            if m.msg_type != MessageType::Propose as i32
+                && m.msg_type != MessageType::ReadIndex as i32
+            {
                 m.log_term = self.term;
             }
 
