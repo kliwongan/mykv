@@ -148,7 +148,6 @@ impl<T: Storage> RaftNode<T> {
     }
 
     pub fn step(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
-        // we step through messages here
         let mut message_log = format!(
             "Received a message from {}, of MessageType {:?}",
             m.from,
@@ -200,7 +199,8 @@ impl<T: Storage> RaftNode<T> {
             // so basically barring some checkquorum and prevote shenanigans,
             // with checking logs, commit indexes, etc
             // we basically ignore, for now
-            let m = Self::new_message(MessageType::AppendResponse, None, m.from);
+            let mut m = Self::new_message(MessageType::AppendResponse, None, m.from);
+            m.reject = true;
             self.send(m);
             message_log.push_str("\nRejecting the request since it is a lower term");
             info!(message_log);
