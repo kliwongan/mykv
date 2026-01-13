@@ -215,7 +215,8 @@ impl<T: Storage> RaftNode<T> {
 
                 let vote = self.voted_for.is_none() || self.voted_for == Some(m.from);
                 //  if the above is met AND the log is up to date
-                let log_up_to_date = true;
+                let other_log = m.entries.clone();
+                let log_up_to_date = self.log_up_to_date(other_log);
                 let mut to_send =
                     Self::new_message(MessageType::RequestVoteResponse, Some(m.to), m.from);
                 to_send.reject = true;
@@ -262,9 +263,7 @@ impl<T: Storage> RaftNode<T> {
 
         // separate match for response types
         match MessageType::try_from(m.msg_type) {
-            _ => {
-
-            }
+            _ => {}
         };
         Ok(())
     }
@@ -291,9 +290,7 @@ impl<T: Storage> RaftNode<T> {
                 // handle vote responses
                 // note that fn step handles votes
             }
-            _ => {
-
-            }
+            _ => {}
         };
         Ok(())
     }
@@ -316,9 +313,7 @@ impl<T: Storage> RaftNode<T> {
                 self.election_elapsed = 0;
                 // append new things to log
             }
-            _ => {
-
-            }
+            _ => {}
         };
         Ok(())
     }
@@ -378,6 +373,17 @@ impl<T: Storage> RaftNode<T> {
             // TODO
         }
         self.msgs.push(m);
+    }
+
+    pub fn log_up_to_date(&self, entries: Vec<Entry>) -> bool {
+        // Checks if the other log is at least as up to date as our own
+        if self.log.last().is_some() && entries.last().is_some() {
+            let log_last = self.log.last().unwrap();
+            let other_last = entries.last().unwrap();
+            return log_last.commit_index > other_last.commit_index
+                || log_last.term > other_last.term;
+        }
+        true
     }
 
     pub fn send_request_vote(&self) -> RequestVote {
