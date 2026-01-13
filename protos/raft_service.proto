@@ -46,7 +46,10 @@ message RaftMessage {
     uint64 from = 3;
     uint64 log_term = 4;
     uint64 index = 5;
-    repeated Entry entries = 6;
+    bool reject = 6;
+    repeated Entry entries = 7;
+    optional uint64 commit_index = 8;
+    optional uint64 commit_term = 9;
 }
 
 enum ConfChangeType {

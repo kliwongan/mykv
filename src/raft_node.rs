@@ -93,6 +93,7 @@ impl<T: Storage> RaftNode<T> {
             heartbeat_timeout: 0,
             election_timeout: 0,
             store: store,
+            msgs: Vec::<RaftMessage>::new(),
         }
     }
 
@@ -193,6 +194,8 @@ impl<T: Storage> RaftNode<T> {
             // so basically barring some checkquorum and prevote shenanigans,
             // with checking logs, commit indexes, etc
             // we basically ignore, for now
+            let m = Self::new_message(MessageType::AppendResponse, None, m.from);
+            self.send(m, &mut self.msgs);
             message_log.push_str("\nRejecting the request since it is a lower term");
             info!(message_log);
         }
@@ -203,13 +206,23 @@ impl<T: Storage> RaftNode<T> {
             Ok(MessageType::RequestVote) => {
                 // if we already voted for the same node already,
                 // or if we don't think there's a leader and we haven't voted yet
+
                 let vote = self.voted_for.is_none() || self.voted_for == Some(m.from);
                 //  if the above is met AND the log is up to date
                 let log_up_to_date = true;
+                let mut to_send = Self::new_message(MessageType::RequestVoteResponse, Some(m.to), m.from);
+                to_send.reject = true;
+                to_send.log_term = m.log_term;
                 // accept the vote
                 if vote && log_up_to_date {
+                    to_send.reject = false;
+                    self.send(m, &mut self.msgs);
+                    self.election_elapsed = 0;
+                    self.voted_for = Some(m.from);
                 } else {
                     // else reject
+                    to_send.reject = true;
+                    self.send(m, &mut self.msgs);
                 }
             }
             _ => match self.state {
@@ -288,12 +301,12 @@ impl<T: Storage> RaftNode<T> {
         retval
     }
 
-    pub fn send(&self, m: RaftMessage, msgs: &mut Vec<RaftMessage>) {
+    pub fn send(&self, mut m: RaftMessage, msgs: &mut Vec<RaftMessage>) {
         // Send a message
         debug!("Attempting to send message from {} to {}", m.from, m.to);
 
         // includes any prevote stuff too if I get to do it
-        if m.msg_type == MessageType::RequestVote as i32  || m.get_msg_type() == MessageType::RequestVoteResponse as i32 {
+        if m.msg_type == MessageType::RequestVote as i32  || m.msg_type == MessageType::RequestVoteResponse as i32 {
             if m.log_term == 0 {
                 error!("The term should be nonzero and set when sending {:?}", MessageType::try_from(m.msg_type));
                 return;
@@ -313,8 +326,7 @@ impl<T: Storage> RaftNode<T> {
 
             // set msg priority here for requestvote or prevote when I implement it
             // TODO
-        }   
-
+        }
         msgs.push(m);
     }
 
