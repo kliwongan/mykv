@@ -14,7 +14,7 @@ use raftrpc::raft_service_server::{RaftService, RaftServiceServer};
 use raftrpc::{ConfChangeArgs, RaftMessage, RequestIdArgs};
 
 // Highly inspired by Riteraft, the code structure here
-// is virtually identical
+// is identical
 pub struct RaftServer {
     addr: SocketAddr,
     rx: Sender<RaftMessage>,

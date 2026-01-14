@@ -26,6 +26,11 @@ struct NetworkConfig {
 
 pub struct RaftConfig {
     // config object for RaftNode
+    id: u64,
+    election_tick: usize,
+    heartbeat_tick: usize,
+    last_applied: u64,
+
 }
 
 // Raft state machine + consensus/timing
@@ -71,10 +76,10 @@ pub struct RaftNode<T: Storage> {
 }
 
 impl<T: Storage> RaftNode<T> {
-    pub fn new(id: u64, store: T) -> Self {
+    pub fn new(config: &RaftConfig, store: T) -> Self {
         let mut rng = rand::rng();
         RaftNode {
-            id: id,
+            id: config.id,
             term: 0,
             voted_for: None,
             leader_id: 0,
@@ -89,8 +94,8 @@ impl<T: Storage> RaftNode<T> {
             network: HashSet::new(),
             election_elapsed: 0,
             heartbeat_elapsed: 0,
-            heartbeat_timeout: 0,
-            election_timeout: 0,
+            heartbeat_timeout: config.heartbeat_tick,
+            election_timeout: config.election_tick,
             store: store,
             msgs: Vec::<RaftMessage>::new(),
         }
