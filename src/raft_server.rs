@@ -1,83 +1,71 @@
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::net::{SocketAddr, ToSocketAddrs};
 use tokio::sync::mpsc::Sender;
 
-use tracing::{Level, error, info};
+use tracing::{Level, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
 use tonic::transport::Server;
-
-use crate::raft_node::{NodeState, RaftNode};
-
-use prost::Message;
 use tonic::{Request, Response, Status};
 
 pub mod raftrpc {
     tonic::include_proto!("raft_service");
 }
-
-use raftrpc::log_entry::{Command, Get, Set};
-use raftrpc::raft_service_client::RaftServiceClient;
 use raftrpc::raft_service_server::{RaftService, RaftServiceServer};
-use raftrpc::{AppendEntries, AppendEntriesResponse, LogEntry, RequestVote, RequestVoteResponse};
+use raftrpc::{ConfChangeArgs, RaftMessage, RequestIdArgs};
 
+// Highly inspired by Riteraft, the code structure here
+// is virtually identical
 pub struct RaftServer {
-    id: u32,
-    // TODO: change this value
-    rx: Sender<u32>,
+    addr: SocketAddr,
+    rx: Sender<RaftMessage>,
 }
 
 impl RaftServer {
-    pub fn new(id: u32, node: Arc<Mutex<RaftNode>>) -> RaftServer {
-        RaftServer { node: node, id: id }
+    pub fn new<T: ToSocketAddrs>(rx: Sender<RaftMessage>, addr: T) -> Self {
+        let addr = addr.to_socket_addrs().unwrap().next().unwrap();
+        RaftServer { addr: addr, rx: rx }
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run(self) {
         let subscriber = FmtSubscriber::builder()
             .with_max_level(Level::TRACE)
             .finish();
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
-        //info!("Listening on: http://{}", addr);
+        let addr = self.addr;
+        info!("Listening on: http://{:?}", addr);
+        let service = RaftServiceServer::new(self);
+        Server::builder()
+            .add_service(service)
+            .serve(addr)
+            .await
+            .expect("Error running the RaftServer");
+        warn!("Server has stopped");
     }
 }
 
 #[tonic::async_trait]
 impl RaftService for RaftServer {
-    async fn send_request_vote(
+    async fn send_message(
         &self,
-        _request: tonic::Request<()>,
-    ) -> std::result::Result<tonic::Response<RequestVote>, tonic::Status> {
-        let node = self.get_node();
-        let node_lock = node.lock().await;
-        Ok(Response::new(node_lock.send_request_vote()))
+        request: Request<RaftMessage>,
+    ) -> Result<Response<RaftMessage>, Status> {
+        let msg = request.into_inner();
+        let sender = self.rx.clone();
+        // TODO until I figure out serialization (serde vs bincode)
+        unimplemented!();
     }
-    async fn request_vote_reply(
+    async fn request_id(
         &self,
-        request: tonic::Request<RequestVote>,
-    ) -> std::result::Result<tonic::Response<RequestVoteResponse>, tonic::Status> {
-        let node = self.get_node();
-        let mut node_lock = node.lock().await;
-        Ok(Response::new(
-            node_lock.request_vote_receiver(request.into_inner()),
-        ))
+        request: Request<RequestIdArgs>,
+    ) -> Result<Response<RaftMessage>, Status> {
+        unimplemented!();
     }
-    async fn send_append_entries(
+
+    async fn change_conf(
         &self,
-        _request: tonic::Request<()>,
-    ) -> std::result::Result<tonic::Response<AppendEntries>, tonic::Status> {
-        let node = self.get_node();
-        let node_lock = node.lock().await;
-        Ok(Response::new(node_lock.send_append_entries()))
-    }
-    async fn append_entries_reply(
-        &self,
-        request: tonic::Request<AppendEntries>,
-    ) -> std::result::Result<tonic::Response<AppendEntriesResponse>, tonic::Status> {
-        let node = self.get_node();
-        let mut node_lock = node.lock().await;
-        Ok(Response::new(
-            node_lock.append_entries_receiver(request.into_inner()),
-        ))
+        request: Request<ConfChangeArgs>,
+    ) -> Result<Response<RaftMessage>, Status> {
+        unimplemented!();
     }
 }

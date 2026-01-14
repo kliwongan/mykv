@@ -29,6 +29,7 @@ pub struct RaftConfig {
 }
 
 // Raft state machine + consensus/timing
+// Inspired by tikv/raft-rs and etcd-io's implementations
 pub struct RaftNode<T: Storage> {
     pub id: u64,
 
@@ -387,7 +388,7 @@ impl<T: Storage> RaftNode<T> {
     }
 
     pub fn log_reconcile(&self, other_log: Vec<Entry>) -> (u64, u64) {
-        // Returns the last commit index and term where our log and the other log 
+        // Returns the last commit index and term where our log and the other log
         // is the same, aka reconcile the differences
         let mut next_index = min(self.log.len(), other_log.len());
         let mut term = self.term;
@@ -400,7 +401,7 @@ impl<T: Storage> RaftNode<T> {
             next_index -= 1;
         }
         term = self.log[next_index].term;
-        
+
         (next_index as u64, term)
     }
 

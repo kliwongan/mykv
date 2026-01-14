@@ -27,15 +27,15 @@ pub struct Args {
 
 #[tokio::main]
 async fn main() {
-    let args = Args::parse();
-    let raft_node = Arc::new(Mutex::new(RaftNode::new(args.id)));
-    let mut server = RaftServer::new(args.id, raft_node);
-    println!("{:?}", args);
-    for node in args.network {
-        println!("Adding node {} to network", node);
-        server.add_network(node).await;
-    }
+    // let args = Args::parse();
+    // let raft_node = Arc::new(Mutex::new(RaftNode::new(args.id)));
+    // let mut server = RaftServer::new(args.id, raft_node);
+    // println!("{:?}", args);
+    // for node in args.network {
+    //     println!("Adding node {} to network", node);
+    //     server.add_network(node).await;
+    // }
 
-    println!("Running service");
-    server.run().await;
+    // println!("Running service");
+    // server.run().await;
 }

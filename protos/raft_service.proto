@@ -1,7 +1,8 @@
 syntax = "proto3";
 package raft_service;
 
-// Inspired from riteraft
+// Inspired from riteraft, identical in some
+// Much credit given there
 
 import "google/protobuf/empty.proto";
 
