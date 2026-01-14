@@ -375,184 +375,48 @@ impl<T: Storage> RaftNode<T> {
         self.msgs.push(m);
     }
 
-    pub fn log_up_to_date(&self, entries: Vec<Entry>) -> bool {
+    pub fn log_up_to_date(&self, other_log: Vec<Entry>) -> bool {
         // Checks if the other log is at least as up to date as our own
-        if self.log.last().is_some() && entries.last().is_some() {
+        if self.log.last().is_some() && other_log.last().is_some() {
             let log_last = self.log.last().unwrap();
-            let other_last = entries.last().unwrap();
+            let other_last = other_log.last().unwrap();
             return log_last.commit_index > other_last.commit_index
                 || log_last.term > other_last.term;
         }
         true
     }
 
-    pub fn send_request_vote(&self) -> RequestVote {
-        RequestVote {
-            term: self.current_term,
-            candidate_id: self.id,
-            last_log_index: if self.log.len() as u64 > 0 {
-                self.log.len() as u64 - 1
-            } else {
-                0
-            },
-            last_log_term: if self.log.len() as u64 > 0 {
-                self.log.get(self.log.len() - 1).unwrap().term
-            } else {
-                self.current_term
-            },
-        }
-    }
-
-    pub fn request_vote_receiver(&mut self, args: RequestVote) -> RequestVoteResponse {
-        let mut result = RequestVoteResponse {
-            term: self.current_term,
-            vote_granted: false,
-            id: self.id,
-        };
-
-        if self.current_term > args.term {
-            return result;
-        }
-
-        let last_entry = self.log.get((args.last_log_index - 1) as usize);
-        if self.voted_for.is_none()
-            && !last_entry.is_none()
-            && last_entry.unwrap().term == args.last_log_term
-        {
-            result.vote_granted = true;
-            self.voted_for = Some(args.candidate_id);
-        }
-
-        return result;
-    }
-
-    pub fn request_vote_sender_response(&mut self, args: RequestVoteResponse) {
-        if args.vote_granted {
-            self.vote_state.insert(args.id);
-        } else if args.term >= self.current_term {
-            self.state = NodeState::Follower;
-        }
-    }
-
-    pub fn send_append_entries(&self) -> AppendEntries {
-        AppendEntries {
-            term: self.current_term,
-            leader_id: self.id,
-            prev_log_index: if self.log.len() as u64 > 0 {
-                self.log.len() as u64 - 1
-            } else {
-                0
-            },
-            prev_log_term: if self.log.len() as u64 > 0 {
-                self.log.get(self.log.len() - 1).unwrap().term
-            } else {
-                self.current_term
-            },
-            entries: self.log.clone(),
-            leader_commit: self.commit_index,
-        }
-    }
-
-    pub fn append_entries_sender_response(
-        &mut self,
-        args: AppendEntriesResponse,
-    ) -> Option<AppendEntries> {
-        if !args.success {
-            self.next_index
-                .insert(args.id, self.next_index.get(&args.id).unwrap() - 1);
-            let mut next_index = self.next_index.get(&args.id).unwrap().clone();
-
-            // minor AppendEntries optimization
-            let conflicting_first_index = args.conflicting_first_index;
-            let conflicting_entry_term = args.conflicting_entry_term;
-
-            if conflicting_first_index.is_some() && conflicting_entry_term.is_some() {
-                let new_index = conflicting_first_index.unwrap();
-                next_index = new_index - 1;
+    pub fn log_reconcile(&self, other_log: Vec<Entry>) -> (u64, u64) {
+        // Returns the last commit index and term where our log and the other log 
+        // is the same, aka reconcile the differences
+        let mut next_index = min(self.log.len(), other_log.len());
+        let mut term = self.term;
+        while next_index >= 0 {
+            let entry = &self.log[next_index];
+            let other_entry = &other_log[next_index];
+            if entry.term == other_entry.term && entry.commit_index == other_entry.commit_index {
+                break;
             }
-            let prev_log_term = if self.log.len() as u64 - 1 > 0 {
-                self.log.get(next_index as usize).unwrap().term
-            } else {
-                self.current_term
-            };
-
-            return Some(AppendEntries {
-                term: self.current_term,
-                leader_id: self.id,
-                prev_log_index: next_index,
-                prev_log_term: prev_log_term,
-                entries: self.log.clone(),
-                leader_commit: self.commit_index,
-            });
+            next_index -= 1;
         }
-        // Use vote_state to maintain nodes that have already replicated our entries
-        self.vote_state.insert(args.id);
-        None
-    }
-
-    pub fn append_entries_receiver(&mut self, args: AppendEntries) -> AppendEntriesResponse {
-        let mut result = AppendEntriesResponse {
-            term: self.current_term,
-            success: false,
-            conflicting_entry_term: None,
-            conflicting_first_index: None,
-            id: self.id,
-        };
-
-        if self.current_term != args.term {
-            if self.current_term < args.term {
-                // we need to step down if we are a leader or candidate
-                self.state = NodeState::Follower;
-                self.current_term = args.term;
-            }
-            return result;
-        }
-
-        // Check for conflicting entries
-        // We must always check this, even for heartbeat RPCs
-        if let Some(entry) = self.log.get((args.prev_log_index - 1) as usize) {
-            // existing entry in the same index but conflicts with current term
-            if entry.term != args.prev_log_term {
-                // find first index and entry term of conflicting entries
-
-                // TODO
-                result.conflicting_entry_term = Some(1);
-                result.conflicting_first_index = Some(1);
-
-                // Delete this entry and all following entries
-                self.log
-                    .truncate((self.log.len() as u64 - args.prev_log_index + 1) as usize);
-            }
-            result.success = true;
-        } else {
-            return result;
-        }
-
-        // append all new entries not already in the log
-        for entry in args.entries {
-            self.log.push(entry);
-        }
-
-        if args.leader_commit > self.commit_index {
-            self.commit_index = min(args.leader_commit, self.log.len() as u64);
-        }
-
-        return result;
+        term = self.log[next_index].term;
+        
+        (next_index as u64, term)
     }
 
     pub fn check_majority(&self) -> bool {
-        let inter = self.vote_state.intersection(&self.network.nodes);
+        let inter = self.vote_state.intersection(&self.network);
         let cnt = inter.count();
-        return cnt > (self.network.nodes.len()).div_ceil(2);
+        return cnt > (self.network.len()).div_ceil(2);
     }
 
-    pub fn get_timeout(&self) -> u64 {
-        return self.timeout;
+    pub fn get_timeout(&self) -> usize {
+        return self.randomized_timeout;
     }
 
     pub fn reset_timeout(&mut self) {
         let mut rng = rand::rng();
-        self.timeout = rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION);
+        self.randomized_timeout = rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION);
     }
 
     pub fn become_leader(&mut self) {
@@ -572,15 +436,15 @@ impl<T: Storage> RaftNode<T> {
     }
 
     pub fn setTerm(&mut self, term: u64) {
-        self.current_term = term;
+        self.term = term;
     }
 
     pub fn getTerm(&self) -> u64 {
-        return self.current_term;
+        return self.term;
     }
 
     pub fn incrementTerm(&mut self) {
-        self.current_term = self.current_term + 1;
+        self.term = self.term + 1;
     }
 
     pub fn is_leader(&self) -> bool {
@@ -604,10 +468,10 @@ impl<T: Storage> RaftNode<T> {
     }
 
     pub fn add_to_network(&mut self, node: u64) {
-        self.network.nodes.insert(node);
+        self.network.insert(node);
     }
 
     pub fn get_network(&self) -> &HashSet<u64> {
-        &self.network.nodes
+        &self.network
     }
 }
