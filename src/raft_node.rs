@@ -30,7 +30,6 @@ pub struct RaftConfig {
     election_tick: usize,
     heartbeat_tick: usize,
     last_applied: u64,
-
 }
 
 // Raft state machine + consensus/timing
@@ -436,20 +435,20 @@ impl<T: Storage> RaftNode<T> {
 
     pub fn become_candidate(&mut self) {
         self.vote_state.clear();
-        self.incrementTerm();
+        self.increment_term();
         self.state = NodeState::Candidate;
         self.vote_state.insert(self.id);
     }
 
-    pub fn setTerm(&mut self, term: u64) {
+    pub fn set_term(&mut self, term: u64) {
         self.term = term;
     }
 
-    pub fn getTerm(&self) -> u64 {
+    pub fn get_term(&self) -> u64 {
         return self.term;
     }
 
-    pub fn incrementTerm(&mut self) {
+    pub fn increment_term(&mut self) {
         self.term = self.term + 1;
     }
 
@@ -465,11 +464,11 @@ impl<T: Storage> RaftNode<T> {
         return self.state == NodeState::Candidate;
     }
 
-    pub fn getState(&self) -> &NodeState {
+    pub fn get_state(&self) -> &NodeState {
         return &self.state;
     }
 
-    pub fn getLeader(&self) -> Option<u64> {
+    pub fn get_leader(&self) -> Option<u64> {
         return self.voted_for;
     }
 

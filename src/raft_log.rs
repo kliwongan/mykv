@@ -1,0 +1,1 @@
+// TODO: Struct that manages the Raft entries/log?
