@@ -4,7 +4,7 @@ use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use tracing::{Level, debug, error, info};
 
-use crate::raft_rpc::raftrpc::{Entry, MessageType, RaftMessage};
+use crate::raft_rpc::raftrpc::{Entry, HardState, MessageType, RaftMessage};
 use crate::storage::Storage;
 
 // Based on the recommended values from the Raft paper
@@ -12,16 +12,12 @@ const MIN_ELECTION_DURATION: usize = 150;
 const MAX_ELECTION_DURATION: usize = 300;
 const INVALID_ID: u64 = 0;
 
-#[derive(Clone, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub enum NodeState {
-    Leader,
+    #[default]
     Follower,
     Candidate,
-}
-
-#[derive(Clone)]
-struct NetworkConfig {
-    nodes: HashSet<u64>,
+    Leader,
 }
 
 pub struct RaftConfig {
@@ -30,6 +26,11 @@ pub struct RaftConfig {
     election_tick: usize,
     heartbeat_tick: usize,
     last_applied: u64,
+}
+
+#[derive(Clone, Debug)]
+struct NetworkConfig {
+    nodes: HashSet<u64>,
 }
 
 // Raft state machine + consensus/timing
