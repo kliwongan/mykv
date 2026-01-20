@@ -12,7 +12,7 @@ const MIN_ELECTION_DURATION: usize = 150;
 const MAX_ELECTION_DURATION: usize = 300;
 const INVALID_ID: u64 = 0;
 
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Copy, Debug, PartialEq)]
 pub enum NodeState {
     #[default]
     Follower,
@@ -20,12 +20,18 @@ pub enum NodeState {
     Leader,
 }
 
+#[derive(Default, Debug, PartialEq)]
+pub struct SoftState {
+    pub leader_id: u64,
+    pub raft_state: NodeState,
+}
+
 pub struct RaftConfig {
     // config object for RaftNode
-    id: u64,
-    election_tick: usize,
-    heartbeat_tick: usize,
-    last_applied: u64,
+    pub id: u64,
+    pub election_tick: usize,
+    pub heartbeat_tick: usize,
+    pub last_applied: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -362,7 +368,7 @@ impl<T: Storage> RaftNode<T> {
             // it's a bit unnecessary? leave in for now
             if m.log_term != 0 {
                 error!(
-                    "The term should not be set when sendinf {:?}",
+                    "The term should not be set when sending {:?}",
                     MessageType::try_from(m.msg_type)
                 );
                 return;
@@ -439,6 +445,23 @@ impl<T: Storage> RaftNode<T> {
         self.increment_term();
         self.state = NodeState::Candidate;
         self.vote_state.insert(self.id);
+    }
+
+    pub fn get_softstate(&self) -> SoftState {
+        SoftState {
+            leader_id: self.leader_id,
+            raft_state: self.state,
+        }
+    }
+
+    pub fn get_hardstate(&self) -> HardState {
+        let mut hs = HardState::default();
+        hs.term = self.term;
+        hs.commit_index = self.commit_index;
+        if let Some(vote) = self.voted_for {
+            hs.vote = vote;
+        }
+        hs
     }
 
     pub fn set_term(&mut self, term: u64) {
