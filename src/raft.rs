@@ -1,19 +1,25 @@
-// The actual Raft
-use crate::raft_node::{RaftNode};
+use crate::raft_manager::RaftManager;
 use crate::raft_rpc::raftrpc::RaftMessage;
 use crate::storage::Storage;
-use crate::raft_server::raftrpc::raft_service_client::RaftServiceClient;
+use crate::raft_rpc::raftrpc::raft_service_client::RaftServiceClient;
+use crate::message::{Message};
 
 use core::panic;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use std::ops::{Deref, DerefMut};
+use prost::Message as PMessage;
+use tokio::spawn;
 use tokio::sync::{oneshot, mpsc};
 use tokio::time::timeout;
 use tonic::transport::channel::Channel;
-use tracing::warn;
+use tonic::Request;
+use tracing::{warn, info};
 
 const HEARTBEAT_DURATION: u64 = 100;
+const MAX_RETRIES: usize = 5;
+const MSG_RETRY_TIMEOUT: u64 = 100;
 
 pub struct RaftServiceNode {
     addr: SocketAddr,
@@ -32,11 +38,54 @@ impl RaftServiceNode {
     }
 }
 
+impl Deref for RaftServiceNode {
+    type Target = RaftServiceClient<Channel>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+impl DerefMut for RaftServiceNode {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.client
+    }
+}
+
+pub struct MessageSender {
+    message: RaftMessage,
+    client: RaftServiceClient<tonic::transport::channel::Channel>,
+    client_id: u64,
+    chan: mpsc::Sender<Message>,
+}
+
+impl MessageSender {
+    async fn send_message(mut self) {
+        let mut retries = 0usize;
+        loop {
+            let msg_request = Request::new(self.message.clone());
+            match self.client.send_message(msg_request).await {
+                Ok(_) => {
+                    return;
+                }
+                Err(e) => {
+                    if retries < MAX_RETRIES {
+                        retries += 1;
+                        tokio::time::sleep(Duration::from_millis(MSG_RETRY_TIMEOUT)).await;
+                    } else {
+                        // send unreachable message back to the raft manager
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub struct Raft<T: Storage> {
-    node: RaftNode<T>,
+    node: RaftManager<T>,
     pub network: HashMap<u64, RaftServiceNode>,
-    pub rx: mpsc::Receiver<RaftMessage>,
-    pub tx: mpsc::Sender<RaftMessage>,
+    pub rx: mpsc::Receiver<Message>,
+    pub tx: mpsc::Sender<Message>,
     store: T,
 }
 
@@ -55,10 +104,13 @@ impl<T: Storage> Raft<T> {
 
             // Placeholders for now
             match timeout(heartbeat, self.rx.recv()).await {
-                Ok(_) => {
-
+                Ok(Some(Message::Raft(m))) => {
+                    if let Ok(_a) = self.step(*m) {};
                 }
                 Err(_) => {
+
+                }
+                Ok(_) => {
 
                 }
             }
@@ -76,13 +128,58 @@ impl<T: Storage> Raft<T> {
         }
     }
 
-    pub async fn on_ready(&mut self, clients: &mut HashMap<u64, oneshot::Sender<RaftMessage>>) {
-        // TODO:
-        
-        //let mut ready = self.node.ready();
+    pub async fn step(&mut self, m: RaftMessage) {
+        self.node.step(m);
+    }
 
-        if !ready.messages().is_empty() {
-            self.send_messages
+
+    pub async fn on_ready(&mut self, clients: &mut HashMap<u64, oneshot::Sender<RaftMessage>>) {
+        if !self.node.has_ready() {
+            return;
+        }
+        
+        let mut ready = self.node.ready();
+
+        if !ready.messages.is_empty() {
+            self.send_messages(ready.messages);
+        }
+
+        // TODO: Snapshot
+
+        // TODO: if entries is not empty, append it to the store
+    
+        // todo: if hardstate changed, persist it to the store
+
+        // send out persisted messages
+
+        // send out light rd messages
+
+        // handle committed entries and then advance apply
+    }
+
+    pub async fn add_node<S: ToSocketAddrs>(&mut self, addr: S, id: u64) {
+        let new_node = RaftServiceNode::new(addr).await;
+        self.network.insert(id, new_node);
+    }
+
+    pub fn get_node_mut(&mut self, id: &u64) -> Option<&mut RaftServiceNode> {
+        self.network.get_mut(&id)
+    }
+
+    async fn send_messages(&mut self, msgs: Vec<RaftMessage>) {
+        for msg in msgs {
+            info!("Message ready to go");
+            // Get peer that I want to send to
+            if let Some(node) = self.get_node_mut(&msg.to) {
+                // Send the message
+            let message_sender = MessageSender {
+                client_id: msg.to,
+                client: node.clone(),
+                chan: self.tx.clone(),
+                message: msg,
+            };
+            tokio::spawn(message_sender.send_message());
+            }
         }
     }
 }

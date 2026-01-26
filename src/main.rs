@@ -5,6 +5,7 @@ mod raft_server;
 mod storage;
 mod raft;
 mod error;
+mod message;
 
 use raft_node::RaftNode;
 use raft_server::RaftServer;

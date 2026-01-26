@@ -1,3 +1,4 @@
+use std::mem;
 use crate::raft_rpc::raftrpc::{Entry, HardState, MessageType, RaftMessage};
 use crate::raft_node::{NodeState, SoftState, RaftConfig, RaftNode};
 use crate::storage::Storage;
@@ -22,6 +23,11 @@ pub struct Ready {
     //is_persisted_msg: bool,
     //light: LightReady,
     pub must_sync: bool,
+    // These are in the LightReady struct in raft-rs
+    // but I though this made things easier
+    pub commit_index: Option<u64>,
+    pub committed_entries: Vec<Entry>,
+    pub messages: Vec<RaftMessage>,
 }
 
 // Wrapper around RaftNode
@@ -98,6 +104,11 @@ impl<T: Storage> RaftManager<T> {
         // TODO grab from proper log when implemented
         rd.entries = raft.log.clone();
 
+        if !raft.msgs.is_empty() {
+            rd.messages = mem::take(&mut raft.msgs);
+        }
+
+        // TODO: committed entries
         rd
     }
 

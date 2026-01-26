@@ -40,7 +40,7 @@ struct NetworkConfig {
 }
 
 // Raft state machine + consensus/timing
-// Inspired by tikv/raft-rs and etcd-io's implementations
+// Inspired by tikv/raft-rs and etcd-io's implementation
 pub struct RaftNode<T: Storage> {
     pub id: u64,
 

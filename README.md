@@ -4,9 +4,7 @@ A distributed key-value store written on top of LevelDB and the Raft consensus a
 
 ### Objectives
 
-The initial goal was to write this without looking at production implementations, but after trying and failing on my own to write clean code that works nicely I decided to just reverse engineer and adapt [TiKV](https://github.com/tikv/raft-rs)'s event driven, state machine Raft node and [Riteraft](https://github.com/PsiACE/riteraft)'s application layer, while doing my own testing using Jepsen and Maelstrom. 
-
-It is a bit lazy since a lot of it is a copy-paste job, but I did do a lot of deliberate learning in the process thinking about the architecture, the reasoning behind each line of code and certainly how to simplify the design for my own purposes. I typed each line of code myself, and only when I completely understood what it did.
+The initial goal was to write this without looking at production implementations, but after trying and failing on my own to write clean code that works nicely I decided to just reverse engineer and adapt [TiKV](https://github.com/tikv/raft-rs)'s event driven, state machine Raft node (which itself adapted from etcd iirc) and [Riteraft](https://github.com/PsiACE/riteraft)'s application layer, while doing my own testing and benchmarking using Jepsen and Maelstrom. 
 
 The objectives of this project were to, in order of completion priority (highest to lowest):
 1. Implement the fundamental Raft election algorithm
@@ -17,7 +15,7 @@ The objectives of this project were to, in order of completion priority (highest
 6. Benchmark and optimize using Jepsen and Maelstrom, ensuring linearizability and correctness
 7. Implement (chunked) snapshotting as outlined in the Raft paper 
 
-This was basically my "learn Rust in-depth as a beginner and might as well learn distributed systems too" project so please do take my coding practices with a grain of salt.
+This was basically my "learn Rust in-depth as an intermediate and might as well learn distributed systems too" project
 
 ### Usage
 
