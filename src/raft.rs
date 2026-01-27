@@ -1,21 +1,22 @@
+use crate::message::Message;
 use crate::raft_manager::RaftManager;
 use crate::raft_rpc::raftrpc::RaftMessage;
-use crate::storage::Storage;
 use crate::raft_rpc::raftrpc::raft_service_client::RaftServiceClient;
-use crate::message::{Message};
+use crate::storage::Storage;
 
-use core::panic;
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
-use std::ops::{Deref, DerefMut};
+use core::{panic};
+use std::error::Error;
 use prost::Message as PMessage;
+use std::collections::HashMap;
+use std::net::{SocketAddr, ToSocketAddrs};
+use std::ops::{Deref, DerefMut};
+use std::time::{Duration, Instant};
 use tokio::spawn;
-use tokio::sync::{oneshot, mpsc};
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
-use tonic::transport::channel::Channel;
 use tonic::Request;
-use tracing::{warn, info};
+use tonic::transport::channel::Channel;
+use tracing::{info, warn};
 
 const HEARTBEAT_DURATION: u64 = 100;
 const MAX_RETRIES: usize = 5;
@@ -33,7 +34,10 @@ impl RaftServiceNode {
         if let Ok(client) = client {
             return RaftServiceNode { addr, client };
         } else {
-            panic!("Failed to connect to peer at {}", format!("http://{}", addr));
+            panic!(
+                "Failed to connect to peer at {}",
+                format!("http://{}", addr)
+            );
         }
     }
 }
@@ -107,12 +111,8 @@ impl<T: Storage> Raft<T> {
                 Ok(Some(Message::Raft(m))) => {
                     if let Ok(_a) = self.step(*m) {};
                 }
-                Err(_) => {
-
-                }
-                Ok(_) => {
-
-                }
+                Err(_) => {}
+                Ok(_) => {}
             }
 
             let elapsed = now.elapsed();
@@ -128,16 +128,15 @@ impl<T: Storage> Raft<T> {
         }
     }
 
-    pub async fn step(&mut self, m: RaftMessage) {
-        self.node.step(m);
+    pub fn step(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
+        self.node.step(m)
     }
-
 
     pub async fn on_ready(&mut self, clients: &mut HashMap<u64, oneshot::Sender<RaftMessage>>) {
         if !self.node.has_ready() {
             return;
         }
-        
+
         let mut ready = self.node.ready();
 
         if !ready.messages.is_empty() {
@@ -147,7 +146,7 @@ impl<T: Storage> Raft<T> {
         // TODO: Snapshot
 
         // TODO: if entries is not empty, append it to the store
-    
+
         // todo: if hardstate changed, persist it to the store
 
         // send out persisted messages
@@ -172,13 +171,13 @@ impl<T: Storage> Raft<T> {
             // Get peer that I want to send to
             if let Some(node) = self.get_node_mut(&msg.to) {
                 // Send the message
-            let message_sender = MessageSender {
-                client_id: msg.to,
-                client: node.clone(),
-                chan: self.tx.clone(),
-                message: msg,
-            };
-            tokio::spawn(message_sender.send_message());
+                let message_sender = MessageSender {
+                    client_id: msg.to,
+                    client: node.clone(),
+                    chan: self.tx.clone(),
+                    message: msg,
+                };
+                tokio::spawn(message_sender.send_message());
             }
         }
     }

@@ -1,11 +1,11 @@
-mod raft_node;
+mod error;
+mod message;
+mod raft;
 mod raft_manager;
+mod raft_node;
 mod raft_rpc;
 mod raft_server;
 mod storage;
-mod raft;
-mod error;
-mod message;
 
 use raft_node::RaftNode;
 use raft_server::RaftServer;

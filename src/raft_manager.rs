@@ -1,15 +1,13 @@
-use std::mem;
+use crate::raft_node::{NodeState, RaftConfig, RaftNode, SoftState};
 use crate::raft_rpc::raftrpc::{Entry, HardState, MessageType, RaftMessage};
-use crate::raft_node::{NodeState, SoftState, RaftConfig, RaftNode};
 use crate::storage::Storage;
+use std::mem;
 
 // BIG TODO: Change error typing!!!
 use core::error::Error;
 
 #[derive(Default, Debug, PartialEq)]
-pub struct ReadState {
-
-}
+pub struct ReadState {}
 
 #[derive(Default, Debug, PartialEq)]
 pub struct Ready {
@@ -63,12 +61,12 @@ impl<T: Storage> RaftManager<T> {
     }
 
     pub fn step(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
-        return self.raft.step(m);
+        self.raft.step(m)
     }
 
     pub fn ready(&mut self) -> Ready {
         let raft = &mut self.raft;
-        
+
         self.max_number += 1;
         let mut rd = Ready {
             number: self.max_number,

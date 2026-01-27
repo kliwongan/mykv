@@ -80,5 +80,5 @@ service RaftService {
     // TODO for RequestID; not completed
     rpc RequestId (RequestIdArgs) returns (RaftMessage);
     rpc ChangeConf (ConfChangeArgs) returns (RaftMessage);
-    rpc SendMessage (RaftMessage) returns (RaftMessage);
+    rpc SendMessage (RaftMessage) returns (google.protobuf.Empty);
 }

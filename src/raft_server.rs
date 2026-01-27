@@ -1,25 +1,21 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 use tokio::sync::mpsc::Sender;
-
-use tracing::{Level, info, warn};
+use tracing::{Level, info, warn, error};
 use tracing_subscriber::FmtSubscriber;
-
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
-pub mod raftrpc {
-    tonic::include_proto!("raft_service");
-}
-use raftrpc::raft_service_server::{RaftService, RaftServiceServer};
-use raftrpc::{ConfChangeArgs, RaftMessage, RequestIdArgs};
+use crate::raft_rpc::raftrpc::raft_service_server::{RaftService, RaftServiceServer};
+use crate::raft_rpc::raftrpc::{ConfChangeArgs, RaftMessage, RequestIdArgs};
+use crate::message::{Message};
 
 pub struct RaftServer {
     addr: SocketAddr,
-    rx: Sender<RaftMessage>,
+    rx: Sender<Message>,
 }
 
 impl RaftServer {
-    pub fn new<T: ToSocketAddrs>(rx: Sender<RaftMessage>, addr: T) -> Self {
+    pub fn new<T: ToSocketAddrs>(rx: Sender<Message>, addr: T) -> Self {
         let addr = addr.to_socket_addrs().unwrap().next().unwrap();
         RaftServer { addr: addr, rx: rx }
     }
@@ -47,11 +43,15 @@ impl RaftService for RaftServer {
     async fn send_message(
         &self,
         request: Request<RaftMessage>,
-    ) -> Result<Response<RaftMessage>, Status> {
+    ) -> Result<Response<()>, Status> {
         let msg = request.into_inner();
         let sender = self.rx.clone();
-        // TODO until I figure out serialization (serde vs bincode)
-        unimplemented!();
+        match sender.send(Message::Raft(Box::new(msg))).await {
+            Ok(_) => (),
+            Err(_) => error!("Error with sending the message")
+        };
+
+        Ok(Response::new(()))
     }
     async fn request_id(
         &self,
