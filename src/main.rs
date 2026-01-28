@@ -1,4 +1,5 @@
 mod error;
+mod kv_service;
 mod message;
 mod raft;
 mod raft_manager;

@@ -26,6 +26,7 @@ pub struct SoftState {
     pub raft_state: NodeState,
 }
 
+#[derive(Default, Debug, PartialEq)]
 pub struct RaftConfig {
     // config object for RaftNode
     pub id: u64,

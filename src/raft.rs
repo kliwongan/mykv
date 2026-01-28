@@ -1,13 +1,14 @@
 use crate::message::Message;
 use crate::raft_manager::RaftManager;
+use crate::raft_node::RaftConfig;
 use crate::raft_rpc::raftrpc::RaftMessage;
 use crate::raft_rpc::raftrpc::raft_service_client::RaftServiceClient;
 use crate::storage::Storage;
 
-use core::{panic};
-use std::error::Error;
+use core::panic;
 use prost::Message as PMessage;
 use std::collections::HashMap;
+use std::error::Error;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::ops::{Deref, DerefMut};
 use std::time::{Duration, Instant};
@@ -85,7 +86,7 @@ impl MessageSender {
     }
 }
 
-pub struct Raft<T: Storage> {
+pub struct Raft<T: Storage + 'static> {
     node: RaftManager<T>,
     pub network: HashMap<u64, RaftServiceNode>,
     pub rx: mpsc::Receiver<Message>,
@@ -94,6 +95,27 @@ pub struct Raft<T: Storage> {
 }
 
 impl<T: Storage> Raft<T> {
+    pub fn new(store: T, rx: mpsc::Receiver<Message>, tx: mpsc::Sender<Message>) -> Self {
+        let config = RaftConfig {
+            id: 1,
+            election_tick: 10,
+            // Heartbeat tick is for how long the leader needs to send
+            // a heartbeat to keep alive.
+            heartbeat_tick: 3,
+            // Just for log
+            ..Default::default()
+        };
+        let node = RaftManager::new(config, store);
+        let network = HashMap::<u64, RaftServiceNode>::new();
+        Self {
+            node,
+            network,
+            rx,
+            tx,
+            store,
+        }
+    }
+
     pub async fn run(mut self) {
         let mut heartbeat = Duration::from_millis(HEARTBEAT_DURATION);
         let mut now = Instant::now();

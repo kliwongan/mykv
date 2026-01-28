@@ -1,13 +1,13 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 use tokio::sync::mpsc::Sender;
-use tracing::{Level, info, warn, error};
-use tracing_subscriber::FmtSubscriber;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
+use tracing::{Level, error, info, warn};
+use tracing_subscriber::FmtSubscriber;
 
+use crate::message::Message;
 use crate::raft_rpc::raftrpc::raft_service_server::{RaftService, RaftServiceServer};
 use crate::raft_rpc::raftrpc::{ConfChangeArgs, RaftMessage, RequestIdArgs};
-use crate::message::{Message};
 
 pub struct RaftServer {
     addr: SocketAddr,
@@ -40,15 +40,12 @@ impl RaftServer {
 
 #[tonic::async_trait]
 impl RaftService for RaftServer {
-    async fn send_message(
-        &self,
-        request: Request<RaftMessage>,
-    ) -> Result<Response<()>, Status> {
+    async fn send_message(&self, request: Request<RaftMessage>) -> Result<Response<()>, Status> {
         let msg = request.into_inner();
         let sender = self.rx.clone();
         match sender.send(Message::Raft(Box::new(msg))).await {
             Ok(_) => (),
-            Err(_) => error!("Error with sending the message")
+            Err(_) => error!("Error with sending the message"),
         };
 
         Ok(Response::new(()))
