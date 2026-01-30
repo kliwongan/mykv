@@ -1,3 +1,4 @@
+use crate::mem_storage::MemStorage;
 use crate::message::Message;
 use crate::raft_manager::RaftManager;
 use crate::raft_node::RaftConfig;
@@ -68,6 +69,7 @@ impl MessageSender {
     async fn send_message(mut self) {
         let mut retries = 0usize;
         loop {
+            info!("Attempting to send message");
             let msg_request = Request::new(self.message.clone());
             match self.client.send_message(msg_request).await {
                 Ok(_) => {
@@ -86,26 +88,24 @@ impl MessageSender {
     }
 }
 
-pub struct Raft<T: Storage + 'static> {
-    node: RaftManager<T>,
+pub struct Raft<T: Storage + 'static + Send> {
+    node: RaftManager<MemStorage>,
     pub network: HashMap<u64, RaftServiceNode>,
     pub rx: mpsc::Receiver<Message>,
     pub tx: mpsc::Sender<Message>,
     store: T,
 }
 
-impl<T: Storage> Raft<T> {
-    pub fn new(store: T, rx: mpsc::Receiver<Message>, tx: mpsc::Sender<Message>) -> Self {
+impl<T: Storage + 'static + Send> Raft<T> {
+    pub fn new(id: u64, store: T, rx: mpsc::Receiver<Message>, tx: mpsc::Sender<Message>) -> Self {
         let config = RaftConfig {
-            id: 1,
+            id: id,
             election_tick: 10,
-            // Heartbeat tick is for how long the leader needs to send
-            // a heartbeat to keep alive.
             heartbeat_tick: 3,
-            // Just for log
             ..Default::default()
         };
-        let node = RaftManager::new(config, store);
+        let mem_storage = MemStorage {};
+        let node = RaftManager::new(config, mem_storage);
         let network = HashMap::<u64, RaftServiceNode>::new();
         Self {
             node,
@@ -131,6 +131,7 @@ impl<T: Storage> Raft<T> {
             // Placeholders for now
             match timeout(heartbeat, self.rx.recv()).await {
                 Ok(Some(Message::Raft(m))) => {
+                    info!("Received a RaftMessage from the server, stepping");
                     if let Ok(_a) = self.step(*m) {};
                 }
                 Err(_) => {}
@@ -142,6 +143,7 @@ impl<T: Storage> Raft<T> {
             if elapsed > heartbeat {
                 heartbeat = Duration::from_millis(HEARTBEAT_DURATION);
                 self.node.tick();
+                info!("Ticking the Raft");
             } else {
                 heartbeat -= elapsed;
             }
@@ -155,6 +157,7 @@ impl<T: Storage> Raft<T> {
     }
 
     pub async fn on_ready(&mut self, clients: &mut HashMap<u64, oneshot::Sender<RaftMessage>>) {
+        info!("Checking readiness");
         if !self.node.has_ready() {
             return;
         }
@@ -162,6 +165,7 @@ impl<T: Storage> Raft<T> {
         let mut ready = self.node.ready();
 
         if !ready.messages.is_empty() {
+            info!("Sending messages from the ready");
             self.send_messages(ready.messages);
         }
 

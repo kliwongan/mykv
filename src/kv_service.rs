@@ -1,5 +1,6 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 use tokio::sync::mpsc;
+use tokio::try_join;
 use tracing::{info, warn};
 
 use crate::message::Message;
@@ -7,15 +8,19 @@ use crate::raft::Raft;
 use crate::raft_server::RaftServer;
 use crate::storage::Storage;
 
-pub struct KVService<S: Storage + 'static> {
+pub struct KVService<S: Storage + 'static + Send> {
     store: S,
     tx: mpsc::Sender<Message>,
     rx: mpsc::Receiver<Message>,
     addr: SocketAddr,
+    id: u64,
+    network: Vec<u64>,
 }
 
-impl<S: Storage + 'static> KVService<S> {
-    pub fn new<T: ToSocketAddrs>(addr: T, store: S) -> Self {
+impl<S: Storage + 'static + Send> KVService<S> {
+    // TODO: Create store/addr here and not accept it as an argument
+    pub fn new(id: u64, store: S) -> Self {
+        let addr = format!("127.0.0.1:{}", id);
         let addr = addr.to_socket_addrs().unwrap().next().unwrap();
         let (tx, rx) = mpsc::channel::<Message>(100);
         Self {
@@ -23,11 +28,27 @@ impl<S: Storage + 'static> KVService<S> {
             tx,
             rx,
             addr,
+            id,
+            network: Vec::new(),
         }
     }
 
-    pub fn run(self) {
+    pub async fn run(self) {
+        // To be run ONLY WHEN all setup is completed
         let addr = self.addr.clone();
-        let node = Raft::new();
+        let mut raft = Raft::new(self.id, self.store, self.rx, self.tx.clone());
+        let server = RaftServer::new(self.tx, addr);
+        for id in self.network {
+            let addr = format!("127.0.0.1:{}", id);
+            raft.add_node(addr, id);
+        }
+        let server_handle = tokio::spawn(server.run());
+        let node_handle = tokio::spawn(raft.run());
+
+        let _ = try_join!(server_handle, node_handle);
+    }
+
+    pub fn add_network(&mut self, id: u64) {
+        self.network.push(id);
     }
 }

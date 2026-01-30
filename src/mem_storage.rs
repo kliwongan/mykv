@@ -1,8 +1,6 @@
 // Mem storage used for testing and benchmarking
-pub struct MemStorage {
+use crate::storage::Storage;
 
-}
+pub struct MemStorage {}
 
-impl Storage for MemStorage {
-    
-}
+impl Storage for MemStorage {}

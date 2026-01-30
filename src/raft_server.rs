@@ -27,7 +27,7 @@ impl RaftServer {
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
         let addr = self.addr;
-        info!("Listening on: http://{:?}", addr);
+        info!("RaftServer listening on: http://{:?}", addr);
         let service = RaftServiceServer::new(self);
         Server::builder()
             .add_service(service)
