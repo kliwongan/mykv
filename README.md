@@ -1,10 +1,11 @@
 # mykv
 
 A distributed key-value store written on top of LevelDB and the Raft consensus algorithm, intended for educational purposes, and is such is not meant for production usage.
+Currently in progress; the objectives will be updated as the progression continues.
 
 ### Objectives
 
-The initial goal was to write this without looking at production implementations, but after trying and failing on my own to write clean code that works nicely I decided to just reverse engineer and adapt [TiKV](https://github.com/tikv/raft-rs)'s event driven, state machine Raft node (which itself adapted from etcd iirc) and [Riteraft](https://github.com/PsiACE/riteraft)'s application layer, while doing my own testing and benchmarking using Jepsen and Maelstrom. 
+The initial goal was to write this without looking at production implementations, but after trying and failing on my own to write clean code that works nicely I decided to just reverse engineer and adapt [TiKV](https://github.com/tikv/raft-rs)'s event driven, state machine Raft node (which itself adapted from etcd iirc) and [Riteraft](https://github.com/PsiACE/riteraft)'s application layer, while doing my own testing and benchmarking using Jepsen and Maelstrom.
 
 The objectives of this project were to, in order of completion priority (highest to lowest):
 1. Implement the fundamental Raft election algorithm
@@ -23,7 +24,7 @@ This was basically my "learn Rust in-depth as an intermediate and might as well 
 
 ### Future additions
 
-Due to the consumption of time, I didn't implement features such as:
+Due to the consumption of time, I chose not to implement features such as:
 
 - Leadership transfer
 - Membership/network configuration changes
