@@ -2,7 +2,7 @@ use core::error::Error;
 use rand::Rng;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
-use tracing::{Level, debug, error, info};
+use tracing::{debug, error, info};
 
 use crate::raft_rpc::raftrpc::{Entry, HardState, MessageType, RaftMessage};
 use crate::storage::Storage;
@@ -72,7 +72,7 @@ pub struct RaftNode<T: Storage> {
     pub state: NodeState,
 
     // Implementation based state
-    pub vote_state: HashSet<u64>,
+    pub vote_state: HashMap<u64, bool>,
     pub network: HashSet<u64>,
 
     // Storage
@@ -97,13 +97,13 @@ impl<T: Storage> RaftNode<T> {
             match_index: HashMap::new(),
             state: NodeState::Follower,
             randomized_timeout: rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION),
-            vote_state: HashSet::new(),
+            vote_state: HashMap::new(),
             network: HashSet::new(),
             election_elapsed: 0,
             heartbeat_elapsed: 0,
             heartbeat_timeout: config.heartbeat_tick,
             election_timeout: config.election_tick,
-            store: store,
+            store,
             msgs: Vec::<RaftMessage>::new(),
         }
     }
@@ -141,8 +141,9 @@ impl<T: Storage> RaftNode<T> {
             // skip until it's needed
 
             // get new message here and step through the msg
-            // let m = new_message(MessageType::);
-            // self.step(m);
+            // currently using Nil subtype to represent non-response
+            let m = Self::new_message(MessageType::Nil, None, self.id);
+            let _ = self.step(m);
             ready = true;
         }
 
@@ -154,7 +155,7 @@ impl<T: Storage> RaftNode<T> {
             self.heartbeat_elapsed = 0;
             // Send out a heartbeat
             let m = Self::new_message(MessageType::Heartbeat, Some(self.id), INVALID_ID);
-            self.step(m);
+            let _ = self.step(m);
             ready = true;
         }
         ready
@@ -222,6 +223,9 @@ impl<T: Storage> RaftNode<T> {
         // now we match by message type?
         // the cases that are handled here should be if self.term <= m.log_term
         match MessageType::try_from(m.msg_type) {
+            Ok(MessageType::Nil) => {
+                self.check_leadership(false);
+            },
             Ok(MessageType::RequestVote) => {
                 // if we already voted for the same node already,
                 // or if we don't think there's a leader and we haven't voted yet
@@ -290,6 +294,7 @@ impl<T: Storage> RaftNode<T> {
                 // become a follower if we detect a leader
                 // in the same or greater term
                 if self.term == m.log_term {
+                    self.leader_id = m.from;
                     self.become_follower();
                 }
             }
@@ -297,11 +302,19 @@ impl<T: Storage> RaftNode<T> {
                 // append new things to log
                 // and then become a follower
                 // send append response
+                self.leader_id = m.from;
                 self.become_follower();
             }
             Ok(MessageType::RequestVoteResponse) => {
                 // handle vote responses
                 // note that fn step handles votes
+                if !m.reject {
+                    self.vote_state.insert(m.from, true);
+                }
+
+                if self.check_majority() {
+                    self.become_leader();
+                }
             }
             _ => {}
         };
@@ -331,14 +344,54 @@ impl<T: Storage> RaftNode<T> {
         Ok(())
     }
 
+    fn check_leadership(&mut self, leader_transfer: bool) {
+        if self.state == NodeState::Leader {
+            info!("Ignoring election timeout because we are the leader");
+            return;
+        }
+
+        // check unapplied committed entries to find a config change
+        // we need to apply configuration changes before we campaign
+        // otherwise we must quit the action
+
+        // check to see if we need to transfer leadership, or have prevote
+        self.start_vote();
+    }
+
+    fn start_vote(&mut self) {
+        info!("Becoming a candidate");
+        self.become_candidate();
+
+        if self.check_majority() {
+            // single node cluster, become leader and return
+            self.become_leader();
+            return;
+        }
+
+        // send out request vote messages
+        for node in self.network.clone() {
+            if node == self.id {
+                continue;
+            }
+
+            let mut m = Self::new_message(MessageType::RequestVote, Some(node), self.id);
+            m.log_term = self.term;
+            m.index = self.last_applied;
+            // TODO term vs log term distinction
+            m.commit_index = Some(self.commit_index);
+            // TODO: commit_term?
+            self.send(m);
+        }
+    }
+
     fn new_message(mtype: MessageType, from: Option<u64>, to: u64) -> RaftMessage {
         let mut retval = RaftMessage {
             msg_type: 0,
             log_term: 0,
             index: 0,
             entries: Vec::new(),
-            from: if let Some(t) = from { t } else { 0 },
-            to: to,
+            from: from.unwrap_or_default(),
+            to,
             commit_index: None,
             commit_term: None,
             reject: false,
@@ -403,14 +456,16 @@ impl<T: Storage> RaftNode<T> {
         // Returns the last commit index and term where our log and the other log
         // is the same, aka reconcile the differences
         let mut next_index = min(self.log.len(), other_log.len());
+        let mut next_index_i = next_index as i32;
         let mut term = self.term;
-        while next_index >= 0 {
+        while next_index_i >= 0 {
             let entry = &self.log[next_index];
             let other_entry = &other_log[next_index];
             if entry.term == other_entry.term && entry.commit_index == other_entry.commit_index {
                 break;
             }
             next_index -= 1;
+            next_index_i -= 1;
         }
         term = self.log[next_index].term;
 
@@ -418,13 +473,17 @@ impl<T: Storage> RaftNode<T> {
     }
 
     pub fn check_majority(&self) -> bool {
-        let inter = self.vote_state.intersection(&self.network);
-        let cnt = inter.count();
-        return cnt > (self.network.len()).div_ceil(2);
+        let mut cnt = 0;
+        for (_, value) in self.vote_state.iter() {
+            if *value {
+                cnt += 1
+            }
+        }
+        cnt > (self.network.len()).div_ceil(2)
     }
 
     pub fn get_timeout(&self) -> usize {
-        return self.randomized_timeout;
+        self.randomized_timeout
     }
 
     pub fn reset_timeout(&mut self) {
@@ -445,7 +504,8 @@ impl<T: Storage> RaftNode<T> {
         self.vote_state.clear();
         self.increment_term();
         self.state = NodeState::Candidate;
-        self.vote_state.insert(self.id);
+        self.vote_state.insert(self.id, true);
+        self.voted_for = Some(self.id);
     }
 
     pub fn get_softstate(&self) -> SoftState {
@@ -470,31 +530,31 @@ impl<T: Storage> RaftNode<T> {
     }
 
     pub fn get_term(&self) -> u64 {
-        return self.term;
+        self.term
     }
 
     pub fn increment_term(&mut self) {
-        self.term = self.term + 1;
+        self.term += 1;
     }
 
     pub fn is_leader(&self) -> bool {
-        return self.state == NodeState::Leader;
+        self.state == NodeState::Leader
     }
 
     pub fn is_follower(&self) -> bool {
-        return self.state == NodeState::Follower;
+        self.state == NodeState::Follower
     }
 
     pub fn is_candidate(&self) -> bool {
-        return self.state == NodeState::Candidate;
+        self.state == NodeState::Candidate
     }
 
     pub fn get_state(&self) -> &NodeState {
-        return &self.state;
+        &self.state
     }
 
     pub fn get_leader(&self) -> Option<u64> {
-        return self.voted_for;
+        self.voted_for
     }
 
     pub fn add_to_network(&mut self, node: u64) {

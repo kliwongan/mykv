@@ -7,7 +7,6 @@ use crate::raft_rpc::raftrpc::raft_service_client::RaftServiceClient;
 use crate::storage::Storage;
 
 use core::panic;
-use prost::Message as PMessage;
 use std::collections::HashMap;
 use std::error::Error;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -34,7 +33,7 @@ impl RaftServiceNode {
         let addr = addr.to_socket_addrs().unwrap().next().unwrap();
         let client = RaftServiceClient::connect(format!("http://{}", addr)).await;
         if let Ok(client) = client {
-            return RaftServiceNode { addr, client };
+            RaftServiceNode { addr, client }
         } else {
             panic!(
                 "Failed to connect to peer at {}",
@@ -93,20 +92,22 @@ pub struct Raft<T: Storage + 'static + Send> {
     pub network: HashMap<u64, RaftServiceNode>,
     pub rx: mpsc::Receiver<Message>,
     pub tx: mpsc::Sender<Message>,
+    // TODO: do we need a secondary store?
     store: T,
 }
 
 impl<T: Storage + 'static + Send> Raft<T> {
     pub fn new(id: u64, store: T, rx: mpsc::Receiver<Message>, tx: mpsc::Sender<Message>) -> Self {
         let config = RaftConfig {
-            id: id,
+            id,
             election_tick: 10,
             heartbeat_tick: 3,
             ..Default::default()
         };
         let mem_storage = MemStorage {};
-        let node = RaftManager::new(config, mem_storage);
+        let mut node = RaftManager::new(config, mem_storage);
         let network = HashMap::<u64, RaftServiceNode>::new();
+        //node.become_leader();
         Self {
             node,
             network,
@@ -121,7 +122,7 @@ impl<T: Storage + 'static + Send> Raft<T> {
         let mut now = Instant::now();
 
         let mut clients = HashMap::new();
-        let mut quit = false;
+        let quit = false;
         loop {
             if quit {
                 warn!("Quitting the Raft");
@@ -162,7 +163,7 @@ impl<T: Storage + 'static + Send> Raft<T> {
             return;
         }
 
-        let mut ready = self.node.ready();
+        let ready = self.node.ready();
 
         if !ready.messages.is_empty() {
             info!("Sending messages from the ready");
@@ -184,11 +185,12 @@ impl<T: Storage + 'static + Send> Raft<T> {
 
     pub async fn add_node<S: ToSocketAddrs>(&mut self, addr: S, id: u64) {
         let new_node = RaftServiceNode::new(addr).await;
+        self.node.add_network(id);
         self.network.insert(id, new_node);
     }
 
     pub fn get_node_mut(&mut self, id: &u64) -> Option<&mut RaftServiceNode> {
-        self.network.get_mut(&id)
+        self.network.get_mut(id)
     }
 
     async fn send_messages(&mut self, msgs: Vec<RaftMessage>) {
@@ -203,7 +205,7 @@ impl<T: Storage + 'static + Send> Raft<T> {
                     chan: self.tx.clone(),
                     message: msg,
                 };
-                tokio::spawn(message_sender.send_message());
+                spawn(message_sender.send_message());
             }
         }
     }

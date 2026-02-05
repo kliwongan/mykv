@@ -1,7 +1,6 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 use tokio::sync::mpsc;
 use tokio::try_join;
-use tracing::{info, warn};
 
 use crate::message::Message;
 use crate::raft::Raft;
@@ -35,7 +34,7 @@ impl<S: Storage + 'static + Send> KVService<S> {
 
     pub async fn run(self) {
         // To be run ONLY WHEN all setup is completed
-        let addr = self.addr.clone();
+        let addr = self.addr;
         let mut raft = Raft::new(self.id, self.store, self.rx, self.tx.clone());
         let server = RaftServer::new(self.tx, addr);
         for id in self.network {

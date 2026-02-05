@@ -1,5 +1,5 @@
 use crate::raft_node::{NodeState, RaftConfig, RaftNode, SoftState};
-use crate::raft_rpc::raftrpc::{Entry, HardState, MessageType, RaftMessage};
+use crate::raft_rpc::raftrpc::{Entry, HardState, RaftMessage};
 use crate::storage::Storage;
 use std::mem;
 
@@ -75,7 +75,7 @@ impl<T: Storage> RaftManager<T> {
 
         // TODO: ready record
 
-        if (self.prev_ss.raft_state != NodeState::Leader && raft.state != NodeState::Leader) {
+        if self.prev_ss.raft_state != NodeState::Leader && raft.state != NodeState::Leader {
             // TODO: Understand this logic
             // for record in every record, assert that record last entry and snapshot are not equal to None
         }
@@ -131,5 +131,13 @@ impl<T: Storage> RaftManager<T> {
         // TODO: read states, unstable entries, snapshots,
         // more entries
         false
+    }
+
+    pub fn become_leader(&mut self) {
+        self.raft.become_leader();
+    }
+
+    pub fn add_network(&mut self, id: u64) {
+        self.raft.add_to_network(id);
     }
 }

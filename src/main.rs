@@ -9,7 +9,7 @@ mod raft_rpc;
 mod raft_server;
 mod storage;
 
-use clap::{ArgAction, Command, Parser, arg, command, value_parser};
+use clap::{Parser, arg};
 
 use crate::{kv_service::KVService, mem_storage::MemStorage};
 

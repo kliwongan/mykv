@@ -17,7 +17,7 @@ pub struct RaftServer {
 impl RaftServer {
     pub fn new<T: ToSocketAddrs>(rx: Sender<Message>, addr: T) -> Self {
         let addr = addr.to_socket_addrs().unwrap().next().unwrap();
-        RaftServer { addr: addr, rx: rx }
+        RaftServer { addr, rx }
     }
 
     pub async fn run(self) {
