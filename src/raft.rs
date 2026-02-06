@@ -144,7 +144,7 @@ impl<T: Storage + 'static + Send> Raft<T> {
             if elapsed > heartbeat {
                 heartbeat = Duration::from_millis(HEARTBEAT_DURATION);
                 self.node.tick();
-                info!("Ticking the Raft");
+                //info!("Ticking the Raft");
             } else {
                 heartbeat -= elapsed;
             }
@@ -158,7 +158,7 @@ impl<T: Storage + 'static + Send> Raft<T> {
     }
 
     pub async fn on_ready(&mut self, clients: &mut HashMap<u64, oneshot::Sender<RaftMessage>>) {
-        info!("Checking readiness");
+        //info!("Checking readiness");
         if !self.node.has_ready() {
             return;
         }

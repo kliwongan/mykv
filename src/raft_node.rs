@@ -89,7 +89,7 @@ impl<T: Storage> RaftNode<T> {
             id: config.id,
             term: 0,
             voted_for: None,
-            leader_id: 0,
+            leader_id: INVALID_ID,
             log: Vec::<Entry>::new(),
             commit_index: 0,
             last_applied: 0,
@@ -117,15 +117,20 @@ impl<T: Storage> RaftNode<T> {
 
     // For followers and candidates to tick the election timer
     pub fn tick_election(&mut self) -> bool {
+        if self.state == NodeState::Follower {
+            info!("Following {}", self.leader_id);
+        }
         self.election_elapsed += 1;
         if self.election_elapsed >= self.randomized_timeout {
             return false;
         }
 
+        info!("Election timer timed out!");
         self.election_elapsed = 0;
         // create new message to send out elections and step into it
-        // self.step(m)
-        // TODO: Since I don't have a hup type message, skip for now?
+        // currently using Nil subtype to represent non-response
+        let m = Self::new_message(MessageType::Nil, None, self.id);
+        let _ = self.step(m);
         true
     }
 
@@ -138,12 +143,12 @@ impl<T: Storage> RaftNode<T> {
         if self.election_elapsed >= self.election_timeout {
             self.election_elapsed = 0;
             // Currently don't have a check quorum function here
-            // skip until it's needed
+            // skip until it's needed?
 
             // get new message here and step through the msg
-            // currently using Nil subtype to represent non-response
-            let m = Self::new_message(MessageType::Nil, None, self.id);
-            let _ = self.step(m);
+
+            //let m = Self::new_message(MessageType::Nil, None, self.id);
+            //let _ = self.step(m);
             ready = true;
         }
 
@@ -154,7 +159,9 @@ impl<T: Storage> RaftNode<T> {
         if self.heartbeat_elapsed >= self.heartbeat_timeout {
             self.heartbeat_elapsed = 0;
             // Send out a heartbeat
-            let m = Self::new_message(MessageType::Heartbeat, Some(self.id), INVALID_ID);
+            info!("Sending out heartbeat from {} to {}", self.id, INVALID_ID);
+            let mut m = Self::new_message(MessageType::Beat, Some(self.id), INVALID_ID);
+            m.log_term = self.term;
             let _ = self.step(m);
             ready = true;
         }
@@ -163,8 +170,10 @@ impl<T: Storage> RaftNode<T> {
 
     pub fn step(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
         let mut message_log = format!(
-            "Received a message from {}, of MessageType {:?}",
+            "Stepping through a message from {} to {}, with term {} of MessageType {:?}",
             m.from,
+            m.to,
+            m.log_term,
             MessageType::try_from(m.msg_type),
         );
         if self.term < m.log_term {
@@ -197,11 +206,11 @@ impl<T: Storage> RaftNode<T> {
             {
                 // this node is the leader to the best of our knowledge since it's sending the commands
                 // if not then eventually we will find the right leader
-                self.become_follower();
+                self.become_follower(m.from);
             } else {
                 // becomes a follower with no idea who the leader is
                 // since we can't guarantee this node is the leader
-                self.become_follower();
+                self.become_follower(INVALID_ID);
             }
         } else if self.term > m.log_term {
             // if the current term is greater
@@ -261,14 +270,21 @@ impl<T: Storage> RaftNode<T> {
     }
 
     fn step_leader(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
+        info!("Step leader called");
         match MessageType::try_from(m.msg_type) {
             Ok(MessageType::Beat) => {
                 // TODO turn into method later
+                info!("Beat match");
                 let lst = self.network.clone();
+                info!(
+                    "Network is {:?}",
+                    &lst
+                );
                 for node in lst {
                     if node != self.id {
                         let mut msg = m.clone();
                         msg.to = node;
+                        info!("Sending heartbeat to {}", msg.to);
                         self.send(msg);
                     }
                 }
@@ -294,16 +310,14 @@ impl<T: Storage> RaftNode<T> {
                 // become a follower if we detect a leader
                 // in the same or greater term
                 if self.term == m.log_term {
-                    self.leader_id = m.from;
-                    self.become_follower();
+                    self.become_follower(m.from);
                 }
             }
             Ok(MessageType::Append) => {
                 // append new things to log
                 // and then become a follower
                 // send append response
-                self.leader_id = m.from;
-                self.become_follower();
+                self.become_follower(m.from);
             }
             Ok(MessageType::RequestVoteResponse) => {
                 // handle vote responses
@@ -359,20 +373,23 @@ impl<T: Storage> RaftNode<T> {
     }
 
     fn start_vote(&mut self) {
-        info!("Becoming a candidate");
+        info!("Starting a vote");
         self.become_candidate();
 
         if self.check_majority() {
             // single node cluster, become leader and return
+            info!("Single node cluster detected");
             self.become_leader();
             return;
         }
 
         // send out request vote messages
-        for node in self.network.clone() {
+        let network = self.network.clone();
+        for node in network {
             if node == self.id {
                 continue;
             }
+
 
             let mut m = Self::new_message(MessageType::RequestVote, Some(node), self.id);
             m.log_term = self.term;
@@ -404,7 +421,7 @@ impl<T: Storage> RaftNode<T> {
         // TODO: Change to &self once I solve the problem
 
         // Send a message
-        debug!("Attempting to send message from {} to {}", m.from, m.to);
+        debug!("Pushing a message from {} to {}", m.from, m.to);
 
         // includes any prevote stuff too if I get to do it
         if m.msg_type == MessageType::RequestVote as i32
@@ -494,10 +511,13 @@ impl<T: Storage> RaftNode<T> {
     pub fn become_leader(&mut self) {
         self.vote_state.clear();
         self.state = NodeState::Leader;
+        info!("Becoming a leader");
     }
 
-    pub fn become_follower(&mut self) {
+    pub fn become_follower(&mut self, leader_id: u64) {
+        self.leader_id = leader_id;
         self.state = NodeState::Follower;
+        info!("Becoming a follower, following {}", leader_id);
     }
 
     pub fn become_candidate(&mut self) {
@@ -506,6 +526,7 @@ impl<T: Storage> RaftNode<T> {
         self.state = NodeState::Candidate;
         self.vote_state.insert(self.id, true);
         self.voted_for = Some(self.id);
+        info!("Becoming a candidate");
     }
 
     pub fn get_softstate(&self) -> SoftState {
@@ -558,7 +579,9 @@ impl<T: Storage> RaftNode<T> {
     }
 
     pub fn add_to_network(&mut self, node: u64) {
+        info!("Inserting {} to node network", node);
         self.network.insert(node);
+        println!("Current network is {:?}", &self.network);
     }
 
     pub fn get_network(&self) -> &HashSet<u64> {

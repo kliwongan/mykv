@@ -1,6 +1,7 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 use tokio::sync::mpsc;
 use tokio::try_join;
+use tracing::info;
 
 use crate::message::Message;
 use crate::raft::Raft;
@@ -48,6 +49,7 @@ impl<S: Storage + 'static + Send> KVService<S> {
     }
 
     pub fn add_network(&mut self, id: u64) {
+        info!("Called here");
         self.network.push(id);
     }
 }
