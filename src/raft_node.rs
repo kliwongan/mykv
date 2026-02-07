@@ -161,7 +161,6 @@ impl<T: Storage> RaftNode<T> {
             // Send out a heartbeat
             info!("Sending out heartbeat from {} to {}", self.id, INVALID_ID);
             let mut m = Self::new_message(MessageType::Beat, Some(self.id), INVALID_ID);
-            m.log_term = self.term;
             let _ = self.step(m);
             ready = true;
         }
@@ -176,7 +175,10 @@ impl<T: Storage> RaftNode<T> {
             m.log_term,
             MessageType::try_from(m.msg_type),
         );
-        if self.term < m.log_term {
+
+        if m.log_term == 0 || m.from == INVALID_ID {
+            // local message, ignore
+        } else if self.term < m.log_term {
             // if requestvote received, then we give it the vote
             // as long as it doesn't hear from a leader within the minimum election timeout
             // due to leader completeness,
@@ -234,9 +236,9 @@ impl<T: Storage> RaftNode<T> {
         match MessageType::try_from(m.msg_type) {
             Ok(MessageType::Nil) => {
                 self.check_leadership(false);
-            },
+            }
             Ok(MessageType::RequestVote) => {
-                // if we already voted for the same node already,
+                // if we already voted for the same node already,RequestVote
                 // or if we don't think there's a leader and we haven't voted yet
 
                 let vote = self.voted_for.is_none() || self.voted_for == Some(m.from);
@@ -244,7 +246,7 @@ impl<T: Storage> RaftNode<T> {
                 let other_log = m.entries.clone();
                 let log_up_to_date = self.log_up_to_date(other_log);
                 let mut to_send =
-                    Self::new_message(MessageType::RequestVoteResponse, Some(m.to), m.from);
+                    Self::new_message(MessageType::RequestVoteResponse, Some(m.from), m.to);
                 to_send.reject = true;
                 to_send.log_term = m.log_term;
                 // accept the vote
@@ -276,10 +278,7 @@ impl<T: Storage> RaftNode<T> {
                 // TODO turn into method later
                 info!("Beat match");
                 let lst = self.network.clone();
-                info!(
-                    "Network is {:?}",
-                    &lst
-                );
+                info!("Network is {:?}", &lst);
                 for node in lst {
                     if node != self.id {
                         let mut msg = m.clone();
@@ -390,8 +389,7 @@ impl<T: Storage> RaftNode<T> {
                 continue;
             }
 
-
-            let mut m = Self::new_message(MessageType::RequestVote, Some(node), self.id);
+            let mut m = Self::new_message(MessageType::RequestVote, Some(self.id), node);
             m.log_term = self.term;
             m.index = self.last_applied;
             // TODO term vs log term distinction
@@ -421,7 +419,12 @@ impl<T: Storage> RaftNode<T> {
         // TODO: Change to &self once I solve the problem
 
         // Send a message
-        debug!("Pushing a message from {} to {}", m.from, m.to);
+        info!(
+            "Pushing a message from {} to {} with type {:?}",
+            m.from,
+            m.to,
+            MessageType::try_from(m.msg_type)
+        );
 
         // includes any prevote stuff too if I get to do it
         if m.msg_type == MessageType::RequestVote as i32
@@ -527,6 +530,7 @@ impl<T: Storage> RaftNode<T> {
         self.vote_state.insert(self.id, true);
         self.voted_for = Some(self.id);
         info!("Becoming a candidate");
+        info!("Current term is now {}", self.term);
     }
 
     pub fn get_softstate(&self) -> SoftState {
@@ -579,9 +583,7 @@ impl<T: Storage> RaftNode<T> {
     }
 
     pub fn add_to_network(&mut self, node: u64) {
-        info!("Inserting {} to node network", node);
         self.network.insert(node);
-        println!("Current network is {:?}", &self.network);
     }
 
     pub fn get_network(&self) -> &HashSet<u64> {

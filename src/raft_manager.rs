@@ -138,7 +138,6 @@ impl<T: Storage> RaftManager<T> {
     }
 
     pub fn add_network(&mut self, id: u64) {
-        println!("Called");
         self.raft.add_to_network(id);
     }
 }

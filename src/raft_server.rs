@@ -22,7 +22,7 @@ impl RaftServer {
 
     pub async fn run(self) {
         let subscriber = FmtSubscriber::builder()
-            .with_max_level(Level::TRACE)
+            .with_max_level(Level::INFO)
             .finish();
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
@@ -42,6 +42,7 @@ impl RaftServer {
 impl RaftService for RaftServer {
     async fn send_message(&self, request: Request<RaftMessage>) -> Result<Response<()>, Status> {
         let msg = request.into_inner();
+        info!("Received a message from {}", msg.clone().from);
         let sender = self.rx.clone();
         match sender.send(Message::Raft(Box::new(msg))).await {
             Ok(_) => (),

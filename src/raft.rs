@@ -9,6 +9,7 @@ use crate::storage::Storage;
 use core::panic;
 use std::collections::HashMap;
 use std::error::Error;
+use std::fmt::Display;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::ops::{Deref, DerefMut};
 use std::time::{Duration, Instant};
@@ -17,12 +18,15 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 use tonic::Request;
 use tonic::transport::channel::Channel;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 const HEARTBEAT_DURATION: u64 = 100;
 const MAX_RETRIES: usize = 5;
 const MSG_RETRY_TIMEOUT: u64 = 100;
+const MAX_RAFT_SERVICE_RETRIES: usize = 10;
+const RAFT_SERVICE_TIMEOUT: u64 = 1000;
 
+#[derive(Debug)]
 pub struct RaftServiceNode {
     addr: SocketAddr,
     client: RaftServiceClient<Channel>,
@@ -31,15 +35,23 @@ pub struct RaftServiceNode {
 impl RaftServiceNode {
     pub async fn new<T: ToSocketAddrs>(addr: T) -> Self {
         let addr = addr.to_socket_addrs().unwrap().next().unwrap();
-        let client = RaftServiceClient::connect(format!("http://{}", addr)).await;
-        if let Ok(client) = client {
-            RaftServiceNode { addr, client }
-        } else {
-            panic!(
-                "Failed to connect to peer at {}",
-                format!("http://{}", addr)
-            );
+        let mut retries = 0;
+        loop {
+            let client = RaftServiceClient::connect(format!("http://{}", addr)).await;
+            if let Ok(client) = client {
+                return RaftServiceNode { addr, client };
+            } else {
+                if retries > MAX_RAFT_SERVICE_RETRIES {
+                    break;
+                }
+                retries += 1;
+                tokio::time::sleep(Duration::from_millis(RAFT_SERVICE_TIMEOUT)).await;
+            }
         }
+        panic!(
+            "Failed to connect to peer at {}",
+            format!("http://{}", addr)
+        );
     }
 }
 
@@ -79,6 +91,7 @@ impl MessageSender {
                         retries += 1;
                         tokio::time::sleep(Duration::from_millis(MSG_RETRY_TIMEOUT)).await;
                     } else {
+                        break;
                         // send unreachable message back to the raft manager
                     }
                 }
@@ -167,7 +180,7 @@ impl<T: Storage + 'static + Send> Raft<T> {
 
         if !ready.messages.is_empty() {
             info!("Sending messages from the ready");
-            self.send_messages(ready.messages);
+            self.send_messages(ready.messages).await;
         }
 
         // TODO: Snapshot
@@ -183,10 +196,13 @@ impl<T: Storage + 'static + Send> Raft<T> {
         // handle committed entries and then advance apply
     }
 
-    pub async fn add_node<S: ToSocketAddrs>(&mut self, addr: S, id: u64) {
-        let new_node = RaftServiceNode::new(addr).await;
+    pub async fn add_node<S: ToSocketAddrs>(&mut self, addr: S, id: u64, exclude_peer: bool) {
+        // Do not add self to peer
+        if !exclude_peer {
+            let new_node = RaftServiceNode::new(addr).await;
+            self.network.insert(id, new_node);
+        }
         self.node.add_network(id);
-        self.network.insert(id, new_node);
     }
 
     pub fn get_node_mut(&mut self, id: &u64) -> Option<&mut RaftServiceNode> {
@@ -195,7 +211,7 @@ impl<T: Storage + 'static + Send> Raft<T> {
 
     async fn send_messages(&mut self, msgs: Vec<RaftMessage>) {
         for msg in msgs {
-            info!("Message ready to go");
+            info!("Message ready to send to {}", msg.to);
             // Get peer that I want to send to
             if let Some(node) = self.get_node_mut(&msg.to) {
                 // Send the message
@@ -206,6 +222,8 @@ impl<T: Storage + 'static + Send> Raft<T> {
                     message: msg,
                 };
                 spawn(message_sender.send_message());
+            } else {
+                error!("Error when trying to get node {} from network, current network is {:?}", &msg.to, &self.network);
             }
         }
     }
