@@ -84,6 +84,7 @@ impl MessageSender {
             let msg_request = Request::new(self.message.clone());
             match self.client.send_message(msg_request).await {
                 Ok(_) => {
+                    info!("Message sent to {} successfully!", self.message.to);
                     return;
                 }
                 Err(e) => {

@@ -2,14 +2,14 @@ use core::error::Error;
 use rand::Rng;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 
 use crate::raft_rpc::raftrpc::{Entry, HardState, MessageType, RaftMessage};
 use crate::storage::Storage;
 
 // Based on the recommended values from the Raft paper
-const MIN_ELECTION_DURATION: usize = 150;
-const MAX_ELECTION_DURATION: usize = 300;
+const MIN_ELECTION_DURATION: usize = 1000 + 150;
+const MAX_ELECTION_DURATION: usize = 1000 + 300;
 const INVALID_ID: u64 = 0;
 
 #[derive(Default, Clone, Copy, Debug, PartialEq)]
@@ -96,7 +96,7 @@ impl<T: Storage> RaftNode<T> {
             next_index: HashMap::new(),
             match_index: HashMap::new(),
             state: NodeState::Follower,
-            randomized_timeout: rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION),
+            randomized_timeout: rng.random_range(config.election_tick..2*config.election_tick),
             vote_state: HashMap::new(),
             network: HashSet::new(),
             election_elapsed: 0,
@@ -121,7 +121,7 @@ impl<T: Storage> RaftNode<T> {
             info!("Following {}", self.leader_id);
         }
         self.election_elapsed += 1;
-        if self.election_elapsed >= self.randomized_timeout {
+        if self.election_elapsed < self.randomized_timeout {
             return false;
         }
 
@@ -160,7 +160,7 @@ impl<T: Storage> RaftNode<T> {
             self.heartbeat_elapsed = 0;
             // Send out a heartbeat
             info!("Sending out heartbeat from {} to {}", self.id, INVALID_ID);
-            let mut m = Self::new_message(MessageType::Beat, Some(self.id), INVALID_ID);
+            let m = Self::new_message(MessageType::Beat, Some(self.id), INVALID_ID);
             let _ = self.step(m);
             ready = true;
         }
@@ -240,25 +240,27 @@ impl<T: Storage> RaftNode<T> {
             Ok(MessageType::RequestVote) => {
                 // if we already voted for the same node already,RequestVote
                 // or if we don't think there's a leader and we haven't voted yet
-
+                //info!("Received a RequestVote message from {}");
                 let vote = self.voted_for.is_none() || self.voted_for == Some(m.from);
                 //  if the above is met AND the log is up to date
                 let other_log = m.entries.clone();
                 let log_up_to_date = self.log_up_to_date(other_log);
                 let mut to_send =
-                    Self::new_message(MessageType::RequestVoteResponse, Some(m.from), m.to);
+                    Self::new_message(MessageType::RequestVoteResponse, Some(self.id), m.from);
                 to_send.reject = true;
                 to_send.log_term = m.log_term;
                 // accept the vote
                 if vote && log_up_to_date {
+                    info!("Accepting the vote from {}", m.from);
                     to_send.reject = false;
                     self.election_elapsed = 0;
                     self.voted_for = Some(m.from);
-                    self.send(m);
+                    self.send(to_send);
                 } else {
                     // else reject
+                    info!("Rejecting the vote from {}", m.from);
                     to_send.reject = true;
-                    self.send(m);
+                    self.send(to_send);
                 }
             }
             _ => match self.state {
@@ -272,16 +274,17 @@ impl<T: Storage> RaftNode<T> {
     }
 
     fn step_leader(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
-        info!("Step leader called");
+        trace!("Step leader called");
         match MessageType::try_from(m.msg_type) {
             Ok(MessageType::Beat) => {
                 // TODO turn into method later
-                info!("Beat match");
+                debug!("Sending out heartbeats");
                 let lst = self.network.clone();
-                info!("Network is {:?}", &lst);
+                debug!("Network is {:?}", &lst);
                 for node in lst {
                     if node != self.id {
                         let mut msg = m.clone();
+                        msg.set_msg_type(MessageType::Heartbeat);
                         msg.to = node;
                         info!("Sending heartbeat to {}", msg.to);
                         self.send(msg);
@@ -301,6 +304,7 @@ impl<T: Storage> RaftNode<T> {
     }
 
     fn step_candidate(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
+        info!("Step candidate called");
         match MessageType::try_from(m.msg_type) {
             Ok(MessageType::Propose) => {
                 // reject proposal since there is no evident leader
@@ -319,9 +323,11 @@ impl<T: Storage> RaftNode<T> {
                 self.become_follower(m.from);
             }
             Ok(MessageType::RequestVoteResponse) => {
+                info!("Received a RequestVoteResponse from {}", m.from);
                 // handle vote responses
                 // note that fn step handles votes
                 if !m.reject {
+                    info!("Recording the vote from {}", m.from);
                     self.vote_state.insert(m.from, true);
                 }
 
@@ -335,6 +341,7 @@ impl<T: Storage> RaftNode<T> {
     }
 
     fn step_follower(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
+        info!("Step follower called");
         match MessageType::try_from(m.msg_type) {
             // TODO: proposal forwarding to leader?
             Ok(MessageType::Propose) => {
@@ -463,12 +470,12 @@ impl<T: Storage> RaftNode<T> {
 
     pub fn log_up_to_date(&self, other_log: Vec<Entry>) -> bool {
         // Checks if the other log is at least as up to date as our own
-        if self.log.last().is_some() && other_log.last().is_some() {
-            let log_last = self.log.last().unwrap();
-            let other_last = other_log.last().unwrap();
-            return log_last.commit_index > other_last.commit_index
-                || log_last.term > other_last.term;
-        }
+        // if self.log.last().is_some() && other_log.last().is_some() {
+        //     let log_last = self.log.last().unwrap();
+        //     let other_last = other_log.last().unwrap();
+        //     return log_last.commit_index > other_last.commit_index
+        //         || log_last.term > other_last.term;
+        // }
         true
     }
 
