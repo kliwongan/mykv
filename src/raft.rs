@@ -22,8 +22,8 @@ use tracing::{error, info, warn};
 
 const HEARTBEAT_DURATION: u64 = 100;
 const MAX_RETRIES: usize = 5;
-const MSG_RETRY_TIMEOUT: u64 = 100;
-const MAX_RAFT_SERVICE_RETRIES: usize = 10;
+const MSG_RETRY_TIMEOUT: u64 = 25;
+const MAX_RAFT_SERVICE_RETRIES: usize = 5;
 const RAFT_SERVICE_TIMEOUT: u64 = 1000;
 
 #[derive(Debug)]
@@ -48,6 +48,7 @@ impl RaftServiceNode {
                 tokio::time::sleep(Duration::from_millis(RAFT_SERVICE_TIMEOUT)).await;
             }
         }
+        // TODO: Instead of panicking do something productive
         panic!(
             "Failed to connect to peer at {}",
             format!("http://{}", addr)
@@ -90,6 +91,10 @@ impl MessageSender {
                 Err(e) => {
                     if retries < MAX_RETRIES {
                         retries += 1;
+                        info!(
+                            "Retrying to send the message to {} for the {}-th time",
+                            self.message.to, &retries
+                        );
                         tokio::time::sleep(Duration::from_millis(MSG_RETRY_TIMEOUT)).await;
                     } else {
                         break;
@@ -224,7 +229,10 @@ impl<T: Storage + 'static + Send> Raft<T> {
                 };
                 spawn(message_sender.send_message());
             } else {
-                error!("Error when trying to get node {} from network, current network is {:?}", &msg.to, &self.network);
+                error!(
+                    "Error when trying to get node {} from network, current network is {:?}",
+                    &msg.to, &self.network
+                );
             }
         }
     }

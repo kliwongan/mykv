@@ -96,7 +96,7 @@ impl<T: Storage> RaftNode<T> {
             next_index: HashMap::new(),
             match_index: HashMap::new(),
             state: NodeState::Follower,
-            randomized_timeout: rng.random_range(config.election_tick..2*config.election_tick),
+            randomized_timeout: rng.random_range(config.election_tick..2 * config.election_tick),
             vote_state: HashMap::new(),
             network: HashSet::new(),
             election_elapsed: 0,
@@ -208,11 +208,11 @@ impl<T: Storage> RaftNode<T> {
             {
                 // this node is the leader to the best of our knowledge since it's sending the commands
                 // if not then eventually we will find the right leader
-                self.become_follower(m.from);
+                self.become_follower(m.from, m.log_term);
             } else {
                 // becomes a follower with no idea who the leader is
                 // since we can't guarantee this node is the leader
-                self.become_follower(INVALID_ID);
+                self.become_follower(INVALID_ID, m.log_term);
             }
         } else if self.term > m.log_term {
             // if the current term is greater
@@ -238,10 +238,11 @@ impl<T: Storage> RaftNode<T> {
                 self.check_leadership(false);
             }
             Ok(MessageType::RequestVote) => {
-                // if we already voted for the same node already,RequestVote
+                // if we already voted for the same node already, RequestVote
                 // or if we don't think there's a leader and we haven't voted yet
                 //info!("Received a RequestVote message from {}");
-                let vote = self.voted_for.is_none() || self.voted_for == Some(m.from);
+                let vote = self.voted_for == Some(m.from)
+                    || (self.voted_for.is_none() && self.leader_id == INVALID_ID);
                 //  if the above is met AND the log is up to date
                 let other_log = m.entries.clone();
                 let log_up_to_date = self.log_up_to_date(other_log);
@@ -313,14 +314,14 @@ impl<T: Storage> RaftNode<T> {
                 // become a follower if we detect a leader
                 // in the same or greater term
                 if self.term == m.log_term {
-                    self.become_follower(m.from);
+                    self.become_follower(m.from, m.log_term);
                 }
             }
             Ok(MessageType::Append) => {
                 // append new things to log
                 // and then become a follower
                 // send append response
-                self.become_follower(m.from);
+                self.become_follower(m.from, m.log_term);
             }
             Ok(MessageType::RequestVoteResponse) => {
                 info!("Received a RequestVoteResponse from {}", m.from);
@@ -350,6 +351,7 @@ impl<T: Storage> RaftNode<T> {
             Ok(MessageType::Heartbeat) => {
                 self.election_elapsed = 0;
                 self.leader_id = m.from;
+                self.term = m.log_term;
                 // send back heartbeat response
                 // TODO: turn into method
                 let msg = Self::new_message(MessageType::HeartbeatResponse, Some(self.id), m.from);
@@ -518,21 +520,36 @@ impl<T: Storage> RaftNode<T> {
         self.randomized_timeout = rng.random_range(MIN_ELECTION_DURATION..MAX_ELECTION_DURATION);
     }
 
+    fn reset(&mut self, term: u64) {
+        if self.term != term {
+            self.term = term;
+            self.voted_for = None;
+        }
+
+        self.vote_state.clear();
+        self.leader_id = INVALID_ID;
+        self.election_elapsed = 0;
+        self.heartbeat_elapsed = 0;
+
+        // basically abort everything
+    }
+
     pub fn become_leader(&mut self) {
         self.vote_state.clear();
         self.state = NodeState::Leader;
         info!("Becoming a leader");
     }
 
-    pub fn become_follower(&mut self, leader_id: u64) {
+    pub fn become_follower(&mut self, leader_id: u64, term: u64) {
+        self.reset(term);
         self.leader_id = leader_id;
         self.state = NodeState::Follower;
         info!("Becoming a follower, following {}", leader_id);
     }
 
     pub fn become_candidate(&mut self) {
-        self.vote_state.clear();
-        self.increment_term();
+        let term = self.term + 1;
+        self.reset(term);
         self.state = NodeState::Candidate;
         self.vote_state.insert(self.id, true);
         self.voted_for = Some(self.id);
