@@ -9,7 +9,6 @@ use crate::storage::Storage;
 use core::panic;
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::Display;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::ops::{Deref, DerefMut};
 use std::time::{Duration, Instant};

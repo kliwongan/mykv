@@ -1,1 +1,5 @@
-// TODO: Struct that manages the Raft entries/log?
+use crate::storage::Storage;
+
+pub struct RaftLog<T: Storage> {
+    
+}

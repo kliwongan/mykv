@@ -29,7 +29,18 @@ message HardState {
     uint64 commit_index = 3;
 }
 
-// TODO: snapshotting and membership change logic
+message SnapshotMetadata {
+    // TODO: conf state
+    uint64 index = 1;
+    uint64 term = 2;
+}
+
+message Snapshot {
+    bytes data = 1;
+    SnapshotMetadata metadata = 2;
+}
+
+// TODO: membership change logic
 
 enum MessageType {
     Nil = 0;

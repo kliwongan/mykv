@@ -4,6 +4,7 @@ use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, error, info, trace};
 
+use crate::error::Result;
 use crate::raft_rpc::raftrpc::{Entry, HardState, MessageType, RaftMessage};
 use crate::storage::Storage;
 
@@ -167,7 +168,7 @@ impl<T: Storage> RaftNode<T> {
         ready
     }
 
-    pub fn step(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
+    pub fn step(&mut self, m: RaftMessage) -> Result<()> {
         let mut message_log = format!(
             "Stepping through a message from {} to {}, with term {} of MessageType {:?}",
             m.from,
@@ -274,7 +275,7 @@ impl<T: Storage> RaftNode<T> {
         Ok(())
     }
 
-    fn step_leader(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
+    fn step_leader(&mut self, m: RaftMessage) -> Result<()> {
         trace!("Step leader called");
         match MessageType::try_from(m.msg_type) {
             Ok(MessageType::Beat) => {
@@ -304,7 +305,7 @@ impl<T: Storage> RaftNode<T> {
         Ok(())
     }
 
-    fn step_candidate(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
+    fn step_candidate(&mut self, m: RaftMessage) -> Result<()> {
         info!("Step candidate called");
         match MessageType::try_from(m.msg_type) {
             Ok(MessageType::Propose) => {
@@ -341,7 +342,7 @@ impl<T: Storage> RaftNode<T> {
         Ok(())
     }
 
-    fn step_follower(&mut self, m: RaftMessage) -> Result<(), Box<dyn Error>> {
+    fn step_follower(&mut self, m: RaftMessage) -> Result<()> {
         info!("Step follower called");
         match MessageType::try_from(m.msg_type) {
             // TODO: proposal forwarding to leader?
