@@ -1,11 +1,12 @@
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use core::panic;
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::error::Result;
 use crate::raft_rpc::raftrpc::{Entry, HardState, Snapshot, SnapshotMetadata};
 use std::cmp;
 use std::sync::Arc;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct RaftState {
     pub hard_state: HardState,
     // TODO: ConfState?
@@ -168,11 +169,19 @@ impl MemStorageInner {
         }
 
         if self.first_index() > entries[0].commit_index {
-            panic!();
+            panic!(
+                "First index {} is greater than the entries' smallest index {}",
+                self.first_index(),
+                entries[0].commit_index
+            );
         }
 
         if self.last_index() + 1 < entries[0].commit_index {
-            panic!();
+            panic!(
+                "Last index {} is greater than the entries' largest index {}",
+                self.last_index(),
+                entries[0].commit_index
+            );
         }
 
         let offset = entries[0].commit_index - self.first_index();
@@ -198,7 +207,9 @@ pub struct MemStorage {
 
 impl MemStorage {
     pub fn new() -> MemStorage {
-        MemStorage { ..Default::default() }
+        MemStorage {
+            ..Default::default()
+        }
     }
 
     pub fn rl(&self) -> RwLockReadGuard<'_, MemStorageInner> {
@@ -207,5 +218,77 @@ impl MemStorage {
 
     pub fn wl(&self) -> RwLockWriteGuard<'_, MemStorageInner> {
         self.inner.write().unwrap()
+    }
+}
+
+// TODO: Change to actual storage trait
+impl StorageTest for MemStorage {
+    fn initial_state(&self) -> Result<RaftState> {
+        Ok(self.rl().raft_state.clone())
+    }
+
+    fn entries(&self, low: u64, high: u64) -> Result<Vec<Entry>> {
+        let mut inner = self.wl();
+        if low < inner.first_index() {
+            // error out; out of bounds
+        }
+
+        if high > inner.last_index() {
+            panic!("Indexing out of bounds; with last index {} and high(er) bound {}", inner.last_index(), high);
+            // TODO: Maybe error out here instead?
+        }
+
+        // check if context can async here
+        if inner.log_unavailable {
+            // return error for log temporarily unavailable
+        }
+
+        let offset =inner.entries[0].commit_index;
+        let lo = (low - offset) as usize;
+        let hi = (high - offset) as usize;
+        let mut entries = inner.entries[lo..hi].to_vec();
+        Ok(entries);
+    }
+
+    fn term(&self, idx: u64) -> Result<u64> {
+        let inner = self.rl();
+        if idx == inner.snapshot_metadata.index {
+            return Ok(inner.snapshot_metadat.term)
+        }
+
+        let offset = inner.first_index();
+        if idx < offset {
+            // Error out; storage was compacted
+        }
+
+        if idx > inner.last_index() {
+            // Error out
+        }
+
+        Ok(inner.entries[(idx - offset) as usize].term)
+    }
+
+    fn first_index(&self) -> Result<u64> {
+        Ok(self.rl().first_index())
+    }
+
+    fn last_index(&self) -> Result<u64> {
+        Ok(self.rl().last_index())
+    }
+
+    fn snapshot(&self, request_index: u64, to: u64) -> Result<Snapshot> {
+        let mut inner = self.wl();
+        if inner.snapshot_unavailable {
+            inner.snapshot_unavailable = false;
+            panic!();
+            // Error out that snapshot is not currently available
+        } else {
+            let mut snapshot = inner.snapshot();
+            if snapshot.metadata.unwrap().index < request_index {
+                // TODO here; need to modify inner snapshot,
+                // need to figure out how
+            }
+            return Ok(snapshot);
+        }
     }
 }
