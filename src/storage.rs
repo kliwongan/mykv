@@ -1,4 +1,3 @@
-use core::panic;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::error::Result;
@@ -201,7 +200,6 @@ impl MemStorageInner {
 
 #[derive(Clone, Default)]
 pub struct MemStorage {
-    // try using tokio RwLock
     inner: Arc<RwLock<MemStorageInner>>,
 }
 
@@ -247,13 +245,13 @@ impl StorageTest for MemStorage {
         let lo = (low - offset) as usize;
         let hi = (high - offset) as usize;
         let mut entries = inner.entries[lo..hi].to_vec();
-        Ok(entries);
+        Ok(entries)
     }
 
     fn term(&self, idx: u64) -> Result<u64> {
         let inner = self.rl();
         if idx == inner.snapshot_metadata.index {
-            return Ok(inner.snapshot_metadat.term)
+            return Ok(inner.snapshot_metadata.term)
         }
 
         let offset = inner.first_index();

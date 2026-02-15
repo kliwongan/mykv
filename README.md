@@ -15,7 +15,7 @@ The objectives of this project are to, in order of completion priority (highest 
 - [ ] Use a proper key-value store in the backend to persist the log entries
 - [ ] Test the performance of the key-value store in-depth using basic tests and some more complex deterministic testing
 - [ ] Benchmark and optimize using Jepsen and Maelstrom, ensuring linearizability and correctness
-- [ ] Implement (chunked) snapshotting as outlined in the Raft paper 
+- [ ] Implement (chunked) snapshotting as outlined in the Raft paper
 
 This is essentially my "learn Rust in-depth as an intermediate and might as well learn distributed systems too" project
 

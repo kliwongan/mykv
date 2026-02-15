@@ -385,6 +385,7 @@ impl<T: Storage> RaftNode<T> {
         info!("Starting a vote");
         self.become_candidate();
 
+        info!("Checking if majority!");
         if self.check_majority() {
             // single node cluster, become leader and return
             info!("Single node cluster detected");
@@ -509,7 +510,7 @@ impl<T: Storage> RaftNode<T> {
                 cnt += 1
             }
         }
-        cnt > (self.network.len()).div_ceil(2)
+        cnt >= (self.network.len()).div_ceil(2)
     }
 
     pub fn get_timeout(&self) -> usize {
